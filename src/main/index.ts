@@ -6,6 +6,7 @@ import { SteamDiscoveryService } from './services/steam-discovery'
 import { CatalogService } from './services/catalog'
 import { DeploymentService } from './services/deployment'
 import { registerIpc, type AppContext } from './ipc'
+import { GameBananaProvider } from './providers/gamebanana'
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined
 declare const MAIN_WINDOW_VITE_NAME: string
@@ -22,7 +23,12 @@ async function createWindow(): Promise<void> {
   })
   mainWindow = window
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
-  window.webContents.on('will-navigate', (event, url) => { if (!url.startsWith('http://localhost:5173')) event.preventDefault() })
+  window.webContents.on('will-navigate', (event, url) => {
+    const devServerUrl = typeof MAIN_WINDOW_VITE_DEV_SERVER_URL === 'string' ? MAIN_WINDOW_VITE_DEV_SERVER_URL : undefined
+    let allowed = false
+    try { allowed = typeof devServerUrl === 'string' && new URL(url).origin === new URL(devServerUrl).origin } catch { allowed = false }
+    if (!allowed) event.preventDefault()
+  })
   window.webContents.on('console-message', (details) => {
     if (details.level === 'error') console.error(`[renderer] ${details.message} (${details.sourceId}:${details.lineNumber})`)
   })
@@ -56,9 +62,11 @@ async function bootstrap(): Promise<void> {
     mainWindow?.webContents.send('progress', event)
   }
   const deployment = new DeploymentService(stateRoot, emit)
+  const providers: AppContext['providers'] = new Map()
+  providers.set('gamebanana', new GameBananaProvider())
   await deployment.recover()
   await createWindow()
-  const context: AppContext = { window: mainWindow!, store, steam, catalog, deployment, libraryRoot, emit }
+  const context: AppContext = { window: mainWindow!, store, steam, catalog, deployment, providers, libraryRoot, emit }
   registerIpc(context)
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) void createWindow() })
 }

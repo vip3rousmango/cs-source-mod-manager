@@ -1,5 +1,5 @@
 export type GameId = 'counter-strike-source'
-export type ModSource = 'catalog' | 'local-folder' | 'local-zip'
+export type ModSource = 'catalog' | 'provider' | 'local-folder' | 'local-zip'
 
 export interface GameInstallation {
   gameId: GameId
@@ -17,6 +17,10 @@ export interface InstalledMod {
   author?: string
   description?: string
   contentPath: string
+  storageId?: string
+  provider?: ModProviderId
+  remoteModId?: string
+  remoteFileId?: string
   archivePath?: string
   archiveSha256?: string
   installedAt: string
@@ -70,6 +74,54 @@ export interface CatalogManifest {
   schemaVersion: 1
   catalogVersion: string
   entries: CatalogEntry[]
+}
+
+export type ModProviderId = 'gamebanana'
+
+export interface ProviderBrowseRequest {
+  provider: ModProviderId
+  query: string
+  page: number
+  perPage: number
+}
+
+export interface ProviderFile {
+  id: string
+  name: string
+  sizeBytes: number
+  format: 'zip' | 'rar' | '7z' | 'other'
+  version?: string
+  installable: boolean
+  status: string
+}
+
+export interface ProviderModSummary {
+  provider: ModProviderId
+  remoteModId: string
+  title: string
+  author?: string
+  description: string
+  tags: string[]
+  category?: string
+  sourceUrl: string
+  previewImageUrl?: string
+  hasFiles: boolean
+}
+
+export interface ProviderSearchResult {
+  provider: ModProviderId
+  query: string
+  page: number
+  perPage: number
+  total: number
+  hasMore: boolean
+  mods: ProviderModSummary[]
+}
+
+export interface ProviderModDetails extends ProviderModSummary {
+  body: string
+  license?: string
+  files: ProviderFile[]
 }
 
 export interface AppState {
@@ -155,6 +207,9 @@ export interface IPCAPI {
   chooseGameDirectory(): Promise<Snapshot>
   refreshCatalog(): Promise<Snapshot>
   installCatalogMod(id: string): Promise<Snapshot>
+  browseProvider(request: ProviderBrowseRequest): Promise<ProviderSearchResult>
+  getProviderMod(provider: ModProviderId, remoteModId: string): Promise<ProviderModDetails>
+  installProviderMod(provider: ModProviderId, remoteModId: string, remoteFileId: string): Promise<Snapshot>
   importLocalMod(): Promise<Snapshot>
   createProfile(name: string): Promise<Snapshot>
   updateProfile(profile: ModProfile): Promise<Snapshot>

@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { IPCAPI, ModProfile, ProgressEvent } from '../shared/contracts'
+import type { IPCAPI, ModProfile, ProgressEvent, ProviderBrowseRequest } from '../shared/contracts'
 
 const api: IPCAPI = {
   getSnapshot: () => ipcRenderer.invoke('getSnapshot'),
@@ -7,6 +7,9 @@ const api: IPCAPI = {
   chooseGameDirectory: () => ipcRenderer.invoke('chooseGameDirectory'),
   refreshCatalog: () => ipcRenderer.invoke('refreshCatalog'),
   installCatalogMod: (id) => ipcRenderer.invoke('installCatalogMod', id),
+  browseProvider: (request: ProviderBrowseRequest) => ipcRenderer.invoke('browseProvider', request),
+  getProviderMod: (provider, remoteModId) => ipcRenderer.invoke('getProviderMod', { provider, remoteModId }),
+  installProviderMod: (provider, remoteModId, remoteFileId) => ipcRenderer.invoke('installProviderMod', { provider, remoteModId, remoteFileId }),
   importLocalMod: () => ipcRenderer.invoke('importLocalMod'),
   createProfile: (name) => ipcRenderer.invoke('createProfile', name),
   updateProfile: (profile: ModProfile) => ipcRenderer.invoke('updateProfile', profile),

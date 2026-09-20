@@ -77,3 +77,32 @@ code { color: #a7c0ff; }
   .catalog-layout { grid-template-columns: 1fr; }
   .catalog-details { position: static; }
 }
+.discover-panel { min-height: 520px; }
+.discover-heading { align-items: flex-start; }
+.provider-badge { padding: 7px 10px; border: 1px solid #4562a2; border-radius: 999px; color: #c9d5ff; background: #202e51; font-size: 12px; font-weight: 750; white-space: nowrap; }
+.discover-toolbar { display: flex; gap: 10px; margin: 24px 0 16px; }
+.discover-toolbar .search-field { flex: 1; }
+.discover-toolbar input { width: 100%; }
+.discover-empty { display: grid; gap: 10px; }
+.discover-layout { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(300px, .8fr); gap: 16px; align-items: start; }
+.result-heading { display: flex; justify-content: space-between; margin-bottom: 10px; }
+.provider-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.provider-card { display: block; padding: 0; overflow: hidden; text-align: left; background: #1a202c; border: 1px solid #333d50; }
+.provider-card:hover, .provider-card.selected { border-color: #6d8fff; filter: none; }
+.provider-art { display: grid; place-items: center; height: 82px; background: linear-gradient(135deg, #3b2d6e, #1b2945); color: #d0c5ff; font-size: 30px; font-weight: 850; }
+.provider-card-body { padding: 14px; }
+.provider-card-body h3 { line-height: 1.25; }
+.provider-card-body p { min-height: 52px; margin: 10px 0; color: #b3bac8; line-height: 1.4; }
+.provider-details { position: sticky; top: 20px; padding: 20px; border: 1px solid #3a496b; border-radius: 12px; background: linear-gradient(160deg, #202b44, #191f2b); }
+.provider-details h3 { margin: 8px 0 4px; font-size: 22px; }
+.provider-files { display: grid; gap: 8px; margin-top: 20px; }
+.provider-files h4 { margin: 0; color: #cbd4e7; }
+.provider-file { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px; border: 1px solid #354057; border-radius: 8px; background: #171d29; }
+.provider-file strong, .provider-file span { display: block; }
+.provider-file span { margin-top: 4px; color: #929eb5; font-size: 11px; }
+.provider-file button { padding: 7px 9px; font-size: 12px; white-space: nowrap; }
+.provider-file button:disabled { cursor: default; opacity: .6; }
+@media (max-width: 800px) {
+  .discover-layout { grid-template-columns: 1fr; }
+  .provider-details { position: static; }
+}

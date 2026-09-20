@@ -15,6 +15,11 @@ export interface ImportOptions {
   libraryRoot: string
   source: ModSource
   modId?: string
+  storageId?: string
+  storageVersion?: string
+  provider?: InstalledMod['provider']
+  remoteModId?: string
+  remoteFileId?: string
   title?: string
   version?: string
   author?: string
@@ -54,6 +59,11 @@ async function readEntries(archivePath: string): Promise<SafeEntry[]> {
       zip.on('error', reject)
     })
   })
+}
+
+function storageSegment(value: string, label: string): string {
+  if (!/^[A-Za-z0-9._-]+$/.test(value) || value === '.' || value === '..') throw new AppError('INVALID_REQUEST', `${label} contains invalid storage metadata.`)
+  return value
 }
 
 async function extractEntry(archivePath: string, sourceName: string, destination: string): Promise<void> {
@@ -116,6 +126,7 @@ export async function importArchive(archivePath: string, options: ImportOptions)
   const entries = await readEntries(archivePath)
   if (entries.reduce((sum, entry) => sum + entry.size, 0) > MAX_ARCHIVE_BYTES) throw new AppError('INVALID_ARCHIVE', 'Archive contents exceed the 2 GiB safety limit.')
   const normalized = normalizeEntries(entries, options.contentRoot)
+  await mkdir(options.libraryRoot, { recursive: true })
   const staging = await mkdtemp(join(options.libraryRoot, '.staging-'))
   try {
     for (const entry of normalized) {
@@ -127,12 +138,14 @@ export async function importArchive(archivePath: string, options: ImportOptions)
     }
     const title = options.title ?? basename(archivePath, extname(archivePath))
     const modId = options.modId ?? safeId(title)
+    const storageId = storageSegment(options.storageId ?? modId, 'Mod storage ID')
     const version = options.version ?? 'local'
-    const contentPath = join(options.libraryRoot, 'mods', modId, version, 'content')
+    const storageVersion = storageSegment(options.storageVersion ?? version, 'Mod storage version')
+    const contentPath = join(options.libraryRoot, 'mods', storageId, storageVersion, 'content')
     await rm(contentPath, { recursive: true, force: true })
     await mkdir(dirname(contentPath), { recursive: true })
     await cp(staging, contentPath, { recursive: true, force: false, errorOnExist: true })
-    return { id: modId, source: options.source, title, version, author: options.author, description: options.description, contentPath, archivePath: options.source === 'local-zip' || options.source === 'catalog' ? archivePath : undefined, archiveSha256: options.expectedSha256, installedAt: new Date().toISOString(), sourceUrl: options.sourceUrl }
+    return { id: modId, source: options.source, title, version, author: options.author, description: options.description, contentPath, storageId, provider: options.provider, remoteModId: options.remoteModId, remoteFileId: options.remoteFileId, archivePath: options.source === 'local-zip' || options.source === 'catalog' || options.source === 'provider' ? archivePath : undefined, archiveSha256: options.expectedSha256, installedAt: new Date().toISOString(), sourceUrl: options.sourceUrl }
   } finally { await rm(staging, { recursive: true, force: true }) }
 }
 

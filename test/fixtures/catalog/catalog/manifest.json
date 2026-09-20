@@ -14,6 +14,19 @@
       "archiveSizeBytes": 884,
       "sourcePageUrl": "https://github.com/vip3rousmango/cs-source-mod-manager",
       "contentRoot": "archive-root"
+    },
+    {
+      "id": "csmm-second-content-pack",
+      "title": "CSMM Second Content Pack",
+      "version": "2.0.0",
+      "author": "CS Source Mod Manager contributors",
+      "description": "A second fixture entry used to verify catalog selection changes after filtering.",
+      "archiveUrl": "https://example.invalid/csmm-demo-content-pack.zip",
+      "tags": ["sounds", "testing"],
+      "archiveSha256": "fae280d9cc24aa495ec535f0276d96cf670c9fd39c940dcbcbf563adcb715cd7",
+      "archiveSizeBytes": 884,
+      "sourcePageUrl": "https://github.com/vip3rousmango/cs-source-mod-manager",
+      "contentRoot": "archive-root"
     }
   ]
 }
