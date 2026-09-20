@@ -14,6 +14,7 @@ import { importArchive, importFolder } from './services/archive-import'
 import { ServerCacheService } from './services/server-cache'
 import { ProviderCacheService } from './services/provider-cache'
 import { GameBananaProvider } from './providers/gamebanana'
+import { CommunityNewsService } from './services/community-news'
 import type { ModProvider } from './providers/mod-provider'
 interface AppContext {
   window: BrowserWindow
@@ -24,20 +25,21 @@ interface AppContext {
   providers: Map<ModProviderId, ModProvider>
   serverCache: ServerCacheService
   providerCache: ProviderCacheService
+  communityNews: CommunityNewsService
   libraryRoot: string
   emit: (event: ProgressEvent) => void
+  operationId?: string
 }
-
 
 function ensureSender(event: Electron.IpcMainInvokeEvent, context: AppContext): void {
   if (event.sender !== context.window.webContents || event.senderFrame !== context.window.webContents.mainFrame) throw new AppError('INVALID_REQUEST', 'Invalid IPC sender.')
-  const frameUrl = event.senderFrame.url
-  let localFrame = frameUrl.startsWith('file://')
   try {
-    const parsed = new URL(frameUrl)
-    localFrame ||= parsed.protocol === 'http:' && (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1')
-  } catch {}
-  if (!localFrame) throw new AppError('INVALID_REQUEST', 'Invalid IPC frame origin.')
+    const frame = new URL(event.senderFrame.url)
+    const expected = new URL(context.window.webContents.getURL())
+    if (frame.protocol !== expected.protocol || frame.hostname !== expected.hostname || frame.port !== expected.port || frame.pathname !== expected.pathname) throw new Error('frame location mismatch')
+  } catch {
+    throw new AppError('INVALID_REQUEST', 'Invalid IPC frame origin.')
+  }
 }
 
 function snapshot(context: AppContext): Snapshot {
@@ -54,12 +56,47 @@ function managedModPath(context: AppContext, mod: AppState['installedMods'][numb
   return join(context.libraryRoot, 'mods', storageId)
 }
 
+
+
 let mutationTail = Promise.resolve()
 
 function enqueueMutation<T>(operation: () => Promise<T>): Promise<T> {
   const result = mutationTail.then(operation, operation)
   mutationTail = result.then(() => undefined, () => undefined)
   return result
+}
+export async function runTrackedMutation<T>(context: AppContext, operation: string, callback: () => Promise<T>): Promise<T> {
+  assertWritable(context)
+  const id = `${operation}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+  const startedAt = new Date().toISOString()
+  const state = context.store.get()
+  await context.store.save({
+    ...state,
+    activity: [...state.activity.slice(-99), { id, operation, status: 'running', message: `${operation} started.`, startedAt }]
+  })
+  context.operationId = id
+  try {
+    const result = await callback()
+    const current = context.store.get()
+    await context.store.save({
+      ...current,
+      activity: current.activity.map((item) => item.id === id ? { ...item, status: 'success', message: `${operation} completed.`, finishedAt: new Date().toISOString() } : item)
+    })
+    return result
+  } catch (error) {
+    const current = context.store.get()
+    await context.store.save({
+      ...current,
+      activity: current.activity.map((item) => item.id === id ? { ...item, status: 'failure', message: toAppError(error).message, finishedAt: new Date().toISOString() } : item)
+    })
+    throw error
+  } finally {
+    context.operationId = undefined
+  }
+}
+
+function enqueueTrackedMutation<T>(context: AppContext, operation: string, callback: () => Promise<T>): Promise<T> {
+  return enqueueMutation(() => runTrackedMutation(context, operation, callback))
 }
 
 function parseProviderModRequest(value: unknown): { provider: ModProviderId; remoteModId: string; remoteFileId?: string; gameId?: SourceGameId } {
@@ -143,6 +180,19 @@ function getProvider(context: AppContext, providerId: ModProviderId): ModProvide
   const provider = context.providers.get(providerId)
   if (!provider) throw new AppError('NOT_FOUND', `Mod provider ${providerId} is not available.`)
   return provider
+}
+
+const PUBLIC_EXTERNAL_HOSTS = new Set(['store.steampowered.com', 'steamcommunity.com', 'gamebanana.com', 'api.gamebanana.com', 'moddb.com', 'www.moddb.com', 'rss.moddb.com', 'developer.valvesoftware.com'])
+
+function parsePublicExternalUrl(value: unknown): string {
+  if (typeof value !== 'string') throw new AppError('INVALID_REQUEST', 'Invalid external URL.')
+  try {
+    const url = new URL(value)
+    if (url.protocol !== 'https:' || url.username || url.password || url.port || !PUBLIC_EXTERNAL_HOSTS.has(url.hostname)) throw new Error('not approved')
+    return url.href
+  } catch {
+    throw new AppError('INVALID_REQUEST', 'External links are limited to approved HTTPS community sources.')
+  }
 }
 
 const GAMEBANANA_DOWNLOAD_HOST = /(^|\.)gamebanana\.com$/i
@@ -262,10 +312,10 @@ async function downloadProviderArchive(context: AppContext, providerId: ModProvi
 
 export function registerIpc(context: AppContext): void {
   const guard = <T>(handler: (context: AppContext, value: T) => Promise<unknown> | unknown) => async (event: Electron.IpcMainInvokeEvent, value: T) => {
-    try { ensureSender(event, context); return await handler(context, value) } catch (error) { throw toAppError(error).toShape() }
+    try { ensureSender(event, context); return await handler(context, value) } catch (error) { const appError = toAppError(error); const serialized = new Error(appError.message); serialized.name = appError.name; Object.assign(serialized, appError.toShape()); throw serialized }
   }
   ipcMain.handle('getSnapshot', guard((_context) => snapshot(context)))
-  ipcMain.handle('discoverGame', guard((current) => enqueueMutation(async () => {
+  ipcMain.handle('discoverGame', guard((current) => enqueueTrackedMutation(current, 'Discover game', async () => {
     assertWritable(current)
     const candidates = await current.steam.discover()
     if (!candidates[0]) throw new AppError('GAME_NOT_FOUND', 'Counter-Strike: Source was not found in the configured Steam libraries.')
@@ -273,7 +323,7 @@ export function registerIpc(context: AppContext): void {
     await current.store.save({ ...state, game: candidates[0] })
     return snapshot(current)
   })))
-  ipcMain.handle('chooseGameDirectory', guard((current) => enqueueMutation(async () => {
+  ipcMain.handle('chooseGameDirectory', guard((current) => enqueueTrackedMutation(current, 'Choose game directory', async () => {
     assertWritable(current)
     const result = await dialog.showOpenDialog(current.window, { properties: ['openDirectory'], title: 'Choose Counter-Strike: Source' })
     if (result.canceled || !result.filePaths[0]) return snapshot(current)
@@ -283,7 +333,7 @@ export function registerIpc(context: AppContext): void {
     return snapshot(current)
   })))
   ipcMain.handle('refreshCatalog', guard((current) => snapshot(current)))
-  ipcMain.handle('installCatalogMod', guard((current, value: unknown) => enqueueMutation(() => downloadCatalogArchive(current, parseCatalogId(value)))))
+  ipcMain.handle('installCatalogMod', guard((current, value: unknown) => enqueueTrackedMutation(current, 'Install curated mod', () => downloadCatalogArchive(current, parseCatalogId(value)))))
   ipcMain.handle('browseProvider', guard(async (current, value: unknown) => {
     const request = parseBrowseRequest(value)
     const fixture = await loadProviderFixture<ProviderSearchResult>('browse')
@@ -309,7 +359,12 @@ export function registerIpc(context: AppContext): void {
     await current.providerCache.set(cacheKey, result)
     return result
   }))
-  ipcMain.handle('createModPack', guard((current, value: unknown) => enqueueMutation(async () => {
+  ipcMain.handle('installProviderMod', guard((current, value: unknown) => enqueueTrackedMutation(current, 'Install community mod', async () => {
+    const args = parseProviderModRequest(value)
+    if (!args.remoteFileId) throw new AppError('INVALID_REQUEST', 'A provider file is required.')
+    return downloadProviderArchive(current, args.provider, args.remoteModId, args.remoteFileId)
+  })))
+  ipcMain.handle('createModPack', guard((current, value: unknown) => enqueueTrackedMutation(current, 'Create mod pack', async () => {
     assertWritable(current)
     if (!value || typeof value !== 'object') throw new AppError('INVALID_REQUEST', 'Invalid mod pack request.')
     const request = value as { name?: unknown; entries?: unknown }
@@ -320,7 +375,9 @@ export function registerIpc(context: AppContext): void {
     await current.store.save({ ...state, modPacks: [...(state.modPacks ?? []), pack] })
     return snapshot(current)
   })))
-  ipcMain.handle('installModPack', guard((current, value: string) => enqueueMutation(async () => {
+  ipcMain.handle('getCommunityNews', guard((current, forceRefresh: unknown) => current.communityNews.getSnapshot(forceRefresh === true)))
+  ipcMain.handle('openExternal', guard((_current, value: unknown) => shell.openExternal(parsePublicExternalUrl(value))))
+  ipcMain.handle('installModPack', guard((current, value: string) => enqueueTrackedMutation(current, 'Install mod pack', async () => {
     assertWritable(current)
     if (typeof value !== 'string' || !/^pack-\d+$/.test(value)) throw new AppError('INVALID_REQUEST', 'Invalid mod pack ID.')
     const pack = (current.store.get().modPacks ?? []).find((candidate) => candidate.id === value)
@@ -337,7 +394,7 @@ export function registerIpc(context: AppContext): void {
     }
     return { ...snapshot(current), packInstall: { packId: pack.id, completed, failures } }
   })))
-  ipcMain.handle('importLocalMod', guard((current) => enqueueMutation(async () => {
+  ipcMain.handle('importLocalMod', guard((current) => enqueueTrackedMutation(current, 'Import local mod', async () => {
     assertWritable(current)
     const result = await dialog.showOpenDialog(current.window, { properties: ['openFile', 'openDirectory'], filters: [{ name: 'Mod files', extensions: ['zip', 'rar', '7z'] }] })
     if (result.canceled || !result.filePaths[0]) return snapshot(current)
@@ -352,7 +409,7 @@ export function registerIpc(context: AppContext): void {
     await current.store.save({ ...state, installedMods: [...state.installedMods.filter((mod) => mod.id !== installed.id), installed] })
     return snapshot(current)
   })))
-  ipcMain.handle('createProfile', guard((current, name: string) => enqueueMutation(async () => {
+  ipcMain.handle('createProfile', guard((current, name: string) => enqueueTrackedMutation(current, 'Create profile', async () => {
     assertWritable(current)
     if (!name?.trim()) throw new AppError('INVALID_REQUEST', 'Profile name cannot be empty.')
     const now = new Date().toISOString()
@@ -361,7 +418,7 @@ export function registerIpc(context: AppContext): void {
     await current.store.save({ ...state, profiles: [...state.profiles, profile] })
     return snapshot(current)
   })))
-  ipcMain.handle('updateProfile', guard((current, value: unknown) => enqueueMutation(async () => {
+  ipcMain.handle('updateProfile', guard((current, value: unknown) => enqueueTrackedMutation(current, 'Update profile', async () => {
     assertWritable(current)
     const profile = parseProfile(value)
     const state = current.store.get()
@@ -370,13 +427,13 @@ export function registerIpc(context: AppContext): void {
     return snapshot(current)
   })))
   ipcMain.handle('previewProfile', guard((current, profileId: string) => current.deployment.preview(current.store.get(), profileId)))
-  ipcMain.handle('deployProfile', guard((current, args: { profileId: string; confirmConflicts: boolean }) => enqueueMutation(async () => {
+  ipcMain.handle('deployProfile', guard((current, args: { profileId: string; confirmConflicts: boolean }) => enqueueTrackedMutation(current, 'Deploy profile', async () => {
     assertWritable(current)
     const result = await current.deployment.deploy(current.store.get(), args.profileId, args.confirmConflicts)
     await current.store.save(result.state)
     return snapshot(current)
   })))
-  ipcMain.handle('removeInstalledMod', guard((current, modId: string) => enqueueMutation(async () => {
+  ipcMain.handle('removeInstalledMod', guard((current, modId: string) => enqueueTrackedMutation(current, 'Remove installed mod', async () => {
     assertWritable(current)
     const state = current.store.get()
     if (state.profiles.some((profile) => profile.entries.some((entry) => entry.modId === modId))) throw new AppError('MOD_IN_USE', 'Remove the mod from every profile before uninstalling it.')
@@ -392,7 +449,7 @@ export function registerIpc(context: AppContext): void {
     clipboard.writeText([`CS Source Mod: ${mod.title}`, `Version: ${mod.version}`, mod.sourceUrl ? `Source: ${mod.sourceUrl}` : undefined, `Managed content: ${mod.contentPath}`].filter(Boolean).join('\n'))
   }))
   ipcMain.handle('getServerCache', guard((current) => current.serverCache.scan(current.store.get().game)))
-  ipcMain.handle('cleanServerCache', guard((current, value: unknown) => enqueueMutation(async () => {
+  ipcMain.handle('cleanServerCache', guard((current, value: unknown) => enqueueTrackedMutation(current, 'Clean server cache', async () => {
     if (value !== true) throw new AppError('INVALID_REQUEST', 'Confirm server cache cleanup before continuing.')
     assertWritable(current)
     const cache = await current.serverCache.scan(current.store.get().game)

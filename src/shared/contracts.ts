@@ -165,6 +165,35 @@ export interface ServerCacheSnapshot {
   truncated: boolean
 }
 
+export type CommunityFeedId = 'steam-news' | 'gamebanana-feed' | 'moddb-downloads' | 'moddb-articles' | 'moddb-addons' | 'valve-developer'
+export type CommunityFeedStatus = 'ok' | 'error'
+export interface CommunityFeedSource {
+  id: CommunityFeedId
+  label: string
+  description: string
+  feedUrl: string
+  siteUrl: string
+}
+export interface CommunityFeedState extends CommunityFeedSource {
+  status: CommunityFeedStatus
+  itemCount: number
+  error?: string
+}
+export interface CommunityNewsItem {
+  id: string
+  feedId: CommunityFeedId
+  sourceLabel: string
+  title: string
+  summary: string
+  url: string
+  publishedAt?: string
+}
+export interface CommunityNewsSnapshot {
+  refreshedAt: string
+  items: CommunityNewsItem[]
+  feeds: CommunityFeedState[]
+}
+
 export interface AppState {
   schemaVersion: 1
   settings: { catalogVersion?: string }
@@ -276,6 +305,8 @@ export interface IPCAPI {
   shareInstalledMod(modId: string): Promise<void>
   getServerCache(): Promise<ServerCacheSnapshot>
   cleanServerCache(confirm: boolean): Promise<ServerCacheSnapshot>
+  getCommunityNews(forceRefresh?: boolean): Promise<CommunityNewsSnapshot>
+  openExternal(url: string): Promise<void>
   subscribeToProgress(listener: (event: ProgressEvent) => void): () => void
 }
 

@@ -5,12 +5,13 @@ import { join } from 'node:path'
 import type { AppState, GameInstallation, InstalledMod, ModProfile } from '../src/shared/contracts'
 import { assertSafeRelativePath, parseCatalog } from '../src/shared/validation'
 import { importArchive, importFolder } from '../src/main/services/archive-import'
-import { ServerCacheService } from '../src/main/services/server-cache'
+import { StateStore } from '../src/main/services/state-store'
 import { DeploymentService } from '../src/main/services/deployment'
+import { ServerCacheService } from '../src/main/services/server-cache'
 import { ProviderCacheService } from '../src/main/services/provider-cache'
 import { GameBananaProvider } from '../src/main/providers/gamebanana'
-import { fetchApprovedProviderDownload } from '../src/main/ipc'
-
+import { fetchApprovedProviderDownload, runTrackedMutation, type AppContext } from '../src/main/ipc'
+import { CommunityNewsService } from '../src/main/services/community-news'
 async function makeMod(root: string, name: string, value: string): Promise<InstalledMod> {
   const source = join(root, `${name}-source`)
   await mkdir(join(source, 'materials'), { recursive: true })
@@ -46,6 +47,45 @@ describe('archive and catalog boundaries', () => {
       })
       expect(installed.id).toBe('verified-catalog-entry')
       expect(installed.contentPath).toBe(join(root, 'library', 'mods', 'verified-catalog-entry', '1', 'content'))
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('activity persistence', () => {
+  it('marks an interrupted operation as failed when state is reloaded', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'csmm-activity-'))
+    try {
+      const filePath = join(root, 'state.json')
+      const store = new StateStore(filePath)
+      await store.save({
+        schemaVersion: 1,
+        settings: {},
+        installedMods: [],
+        profiles: [],
+        activity: [{ id: 'operation-1', operation: 'Install community mod', status: 'running', message: 'Install community mod started.', startedAt: new Date(0).toISOString() }]
+      })
+      const reloaded = new StateStore(filePath)
+      const state = await reloaded.load()
+      expect(state.activity[0]).toMatchObject({ id: 'operation-1', status: 'failure', message: 'Operation was interrupted before completion.' })
+      expect(state.activity[0].finishedAt).toBeTruthy()
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+  it('does not overwrite preserved recovery state when a mutation is attempted', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'csmm-recovery-'))
+    try {
+      const filePath = join(root, 'state.json')
+      const original = JSON.stringify({ schemaVersion: 99, sentinel: 'preserve-me' })
+      await writeFile(filePath, original)
+      const store = new StateStore(filePath)
+      await store.load()
+      const callback = vi.fn(async () => 'should not run')
+      await expect(runTrackedMutation({ store } as AppContext, 'Unsafe mutation', callback)).rejects.toMatchObject({ code: 'RECOVERY_REQUIRED' })
+      expect(callback).not.toHaveBeenCalled()
+      expect(await readFile(filePath, 'utf8')).toBe(original)
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -289,6 +329,52 @@ describe('profile deployment', () => {
       expect(await readFile(join(gameContent, 'custom', 'unmanaged', 'keep.txt'), 'utf8')).toBe('keep')
     } finally {
       await rm(root, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('community news feeds', () => {
+  const rss = (host: string): string => `<?xml version="1.0"?><rss version="2.0"><channel><item><title>Community update</title><link>https://${host}/news/1</link><description>Safe update</description></item></channel></rss>`
+
+  it('rejects HTML error pages and omits the retired Steam Community feed', async () => {
+    const fetchMock = vi.fn(async (input: string | URL) => {
+      const url = String(input)
+      if (url.includes('store.steampowered.com')) return new Response('<!doctype html><title>No group could be retrieved</title>', { status: 200, headers: { 'content-type': 'text/html' } })
+      const host = new URL(url).hostname
+      return new Response(rss(host), { status: 200, headers: { 'content-type': 'application/rss+xml' } })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      const snapshot = await new CommunityNewsService().getSnapshot(true)
+      expect(snapshot.feeds).toHaveLength(6)
+      expect(snapshot.feeds.map((feed) => feed.id)).toEqual(['steam-news', 'gamebanana-feed', 'moddb-downloads', 'moddb-articles', 'moddb-addons', 'valve-developer'])
+      expect(snapshot.feeds.find((feed) => feed.id === 'steam-news')).toMatchObject({ status: 'error', error: 'Feed returned a non-XML response.' })
+      expect(snapshot.items).toHaveLength(5)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('enforces the response byte cap while the feed is streaming', async () => {
+    const oversized = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(600_000))
+        controller.enqueue(new Uint8Array(600_000))
+        controller.close()
+      }
+    })
+    const fetchMock = vi.fn(async (input: string | URL) => {
+      const url = String(input)
+      if (url.includes('store.steampowered.com')) return new Response(oversized, { status: 200, headers: { 'content-type': 'application/rss+xml' } })
+      const host = new URL(url).hostname
+      return new Response(rss(host), { status: 200, headers: { 'content-type': 'application/rss+xml' } })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      const snapshot = await new CommunityNewsService().getSnapshot(true)
+      expect(snapshot.feeds.find((feed) => feed.id === 'steam-news')).toMatchObject({ status: 'error', error: 'Feed response exceeded the safety limit.' })
+    } finally {
+      vi.unstubAllGlobals()
     }
   })
 })
