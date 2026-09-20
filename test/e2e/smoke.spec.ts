@@ -7,12 +7,21 @@ function electronExecutable(): string {
   return join(process.cwd(), 'node_modules/electron/dist/electron')
 }
 
-test('launches the desktop shell and renders setup', async () => {
-  const application = await electron.launch({ executablePath: electronExecutable(), args: [join(process.cwd(), '.vite/build/index.js')] })
+test('launches the desktop shell and browses a populated curated catalog', async () => {
+  const fixtureRoot = join(process.cwd(), 'test/fixtures/catalog')
+  const application = await electron.launch({ cwd: fixtureRoot, executablePath: electronExecutable(), args: [join(process.cwd(), '.vite/build/index.js')] })
   try {
     const page = await application.firstWindow()
     await expect(page.locator('h1')).toHaveText('CS Source Mod Manager')
-    await expect(page.getByText('No Counter-Strike: Source installation selected.')).toBeVisible()
+    await page.getByRole('button', { name: 'catalog' }).click()
+    await expect(page.getByRole('heading', { name: 'Mod catalog' })).toBeVisible()
+    await expect(page.getByRole('button', { name: /CSMM Demo Content Pack/ })).toBeVisible()
+    await expect(page.getByRole('complementary').getByRole('heading', { name: 'CSMM Demo Content Pack' })).toBeVisible()
+    await expect(page.getByText('Download & install')).toBeVisible()
+    await page.getByRole('textbox', { name: 'Search mods' }).fill('materials')
+    await expect(page.getByRole('button', { name: /CSMM Demo Content Pack/ })).toBeVisible()
+    await page.getByRole('textbox', { name: 'Search mods' }).fill('does-not-exist')
+    await expect(page.getByText('No mods match this search.')).toBeVisible()
   } finally {
     await application.close()
   }

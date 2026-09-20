@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "catalogVersion": "fixture",
+  "entries": [
+    {
+      "id": "csmm-demo-content-pack",
+      "title": "CSMM Demo Content Pack",
+      "version": "1.0.0",
+      "author": "CS Source Mod Manager contributors",
+      "description": "A first-party fixture used to exercise catalog browsing and verified archive metadata without publishing third-party content.",
+      "archiveUrl": "https://example.invalid/csmm-demo-content-pack.zip",
+      "tags": ["demo", "materials", "testing"],
+      "archiveSha256": "fae280d9cc24aa495ec535f0276d96cf670c9fd39c940dcbcbf563adcb715cd7",
+      "archiveSizeBytes": 884,
+      "sourcePageUrl": "https://github.com/vip3rousmango/cs-source-mod-manager",
+      "contentRoot": "archive-root"
+    }
+  ]
+}
