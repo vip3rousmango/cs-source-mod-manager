@@ -7,6 +7,7 @@ import { assertSafeRelativePath, parseCatalog } from '../src/shared/validation'
 import { importArchive, importFolder } from '../src/main/services/archive-import'
 import { ServerCacheService } from '../src/main/services/server-cache'
 import { DeploymentService } from '../src/main/services/deployment'
+import { ProviderCacheService } from '../src/main/services/provider-cache'
 import { GameBananaProvider } from '../src/main/providers/gamebanana'
 
 async function makeMod(root: string, name: string, value: string): Promise<InstalledMod> {
@@ -67,6 +68,22 @@ describe('GameBanana provider', () => {
       expect(result.mods[0]).toMatchObject({ remoteModId: '11', title: 'CSS HUD', description: 'Readable & safe', tags: ['HUD'], previewImageUrl: 'https://images.gamebanana.com/img/ss/mods/530-90_preview.jpg' })
       expect(String(fetchMock.mock.calls[0][0])).toContain('_sSearchString=hud')
       expect(String(fetchMock.mock.calls[0][0])).toContain('_idGameRow=2')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+  it('maps the selected Source game into the provider query and results', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      _aMetadata: { _nRecordCount: 1 },
+      _aRecords: [
+        { _idRow: 21, _sName: 'Half-Life HUD', _sProfileUrl: 'https://gamebanana.com/mods/21', _sDescription: 'HL2', _aGame: { _idRow: 9 }, _bHasFiles: false }
+      ]
+    }), { status: 200, headers: { 'content-type': 'application/json' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      const result = await new GameBananaProvider().browse({ query: '', page: 1, perPage: 20, gameId: 'half-life-2' })
+      expect(result.mods[0]).toMatchObject({ gameId: 'half-life-2', remoteModId: '21' })
+      expect(new URL(String(fetchMock.mock.calls[0][0])).searchParams.get('_aFilters[Generic_Game]')).toBe('9')
     } finally {
       vi.unstubAllGlobals()
     }
@@ -158,6 +175,22 @@ describe('GameBanana provider', () => {
       await expect(new GameBananaProvider().resolveDownload('11', '21')).resolves.toMatchObject({ url: 'https://gamebanana.com/dl/21', checksumMd5: '0123456789abcdef0123456789abcdef' })
     } finally {
       vi.unstubAllGlobals()
+    }
+  })
+})
+describe('provider response cache', () => {
+  it('persists short-lived responses and clears them explicitly', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'csmm-provider-cache-'))
+    try {
+      const cache = new ProviderCacheService(root, 60_000)
+      await cache.set('browse:gamebanana:css:hud', { total: 1 })
+      expect(await cache.get<{ total: number }>('browse:gamebanana:css:hud')).toEqual({ total: 1 })
+      const reloaded = new ProviderCacheService(root, 60_000)
+      expect(await reloaded.get<{ total: number }>('browse:gamebanana:css:hud')).toEqual({ total: 1 })
+      await reloaded.clear()
+      expect(await reloaded.get('browse:gamebanana:css:hud')).toBeUndefined()
+    } finally {
+      await rm(root, { recursive: true, force: true })
     }
   })
 })

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { DiscoverView } from './DiscoverView'
 import { LibraryView } from './LibraryView'
 import { ServerCacheView } from './ServerCacheView'
-import type { CatalogEntry, DeploymentPreview, ModProfile, ProgressEvent, ServerCacheSnapshot, Snapshot } from '../shared/contracts'
+import type { CatalogEntry, DeploymentPreview, ModPackEntry, ModProfile, ProgressEvent, ServerCacheSnapshot, Snapshot } from '../shared/contracts'
 
 type View = 'setup' | 'discover' | 'catalog' | 'library' | 'profiles' | 'server-cache' | 'activity'
 
@@ -83,7 +83,22 @@ export default function App() {
   }
 
   async function run(operation: () => Promise<Snapshot>): Promise<void> {
-    try { setSnapshot(await operation()); setError(undefined) } catch (operationError) { setError(errorMessage(operationError)) }
+    try {
+      const next = await operation()
+      setSnapshot(next)
+      setError(next.packInstall?.failures.length ? `Pack installed ${next.packInstall.completed} item(s); ${next.packInstall.failures.length} failed.` : undefined)
+    } catch (operationError) {
+      setError(errorMessage(operationError))
+    }
+  }
+  async function createModPack(name: string, entries: ModPackEntry[]): Promise<void> {
+    try {
+      setSnapshot(await window.csmm.createModPack(name, entries))
+      setError(undefined)
+    } catch (operationError) {
+      setError(errorMessage(operationError))
+      throw operationError
+    }
   }
 
   async function updateProfile(profile: ModProfile, entries: ModProfile['entries']): Promise<void> {
@@ -124,9 +139,9 @@ export default function App() {
     {snapshot.recoveryRequired && <div className="alert error"><strong>Recovery required</strong><span>{snapshot.recoveryRequired}</span></div>}
     {view === 'setup' && <section className="panel"><h2>Game setup</h2><p className="muted">Managed deployments live under <code>cstrike/custom</code>. The only exception is an explicit, confirmed cleanup of downloaded server content under <code>cstrike/download</code>.</p><div className="actions"><button onClick={() => void run(() => window.csmm.discoverGame())}>Detect Steam installation</button><button className="secondary" onClick={() => void run(() => window.csmm.chooseGameDirectory())}>Choose directory</button></div>{snapshot.game ? <div className="success"><strong>Connected</strong><span>{snapshot.game.installPath}</span></div> : <p className="empty">No Counter-Strike: Source installation selected.</p>}</section>}
     {view === 'profiles' && <section className="panel"><div className="section-heading"><div><h2>Profiles</h2><p className="muted">Priority is explicit; higher values win conflicts.</p></div><div className="inline-form"><input value={profileName} onChange={(event) => setProfileName(event.target.value)} aria-label="New profile name" /><button onClick={() => void run(() => window.csmm.createProfile(profileName))}>Create</button></div></div>{snapshot.profiles.length === 0 ? <p className="empty">Create a profile to compose installed mods.</p> : <><label className="field">Profile<select value={currentProfile?.id ?? ''} onChange={(event) => { setSelectedProfile(event.target.value); setPreview(undefined) }}>{snapshot.profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label>{currentProfile && <><div className="list">{snapshot.installedMods.length === 0 ? <p className="empty">Import a mod before composing this profile.</p> : snapshot.installedMods.map((mod) => { const entry = currentProfile.entries.find((candidate) => candidate.modId === mod.id); const enabled = entry?.enabled ?? false; return <div className="list-row" key={mod.id}><label className="check"><input type="checkbox" checked={enabled} onChange={(event) => { const entries = currentProfile.entries.filter((candidate) => candidate.modId !== mod.id); entries.push({ modId: mod.id, enabled: event.target.checked, priority: entry?.priority ?? 0 }); void updateProfile(currentProfile, entries) }} /><span><strong>{mod.title}</strong><small>{mod.source} · {mod.version}</small></span></label><input className="priority" type="number" value={entry?.priority ?? 0} aria-label={`${mod.title} priority`} onChange={(event) => { const entries = currentProfile.entries.filter((candidate) => candidate.modId !== mod.id); entries.push({ modId: mod.id, enabled, priority: Number(event.target.value) || 0 }); void updateProfile(currentProfile, entries) }} /></div> })}</div><div className="actions"><button onClick={async () => { try { setPreview(await window.csmm.previewProfile(currentProfile.id)); setError(undefined) } catch (operationError) { setError(errorMessage(operationError)) } }}>Preview deployment</button><button onClick={() => void run(() => window.csmm.deployProfile(currentProfile.id, Boolean(preview?.conflicts.length)))}>{preview?.conflicts.length ? 'Confirm & deploy conflicts' : 'Deploy profile'}</button></div>{preview && <div className={preview.conflicts.length ? 'alert warning' : 'success'}><strong>{preview.conflicts.length ? 'Conflicts require review' : 'No conflicts'}</strong><span>{preview.fileCount} files · {preview.conflicts.length} conflicts</span>{preview.conflicts.map((conflict) => <span key={conflict.relativePath}>{conflict.relativePath}: {conflict.winnerModId} wins</span>)}</div>}</>}</>}</section>}
-    {view === 'discover' && <DiscoverView snapshot={snapshot} onInstall={(provider, remoteModId, remoteFileId) => void run(() => window.csmm.installProviderMod(provider, remoteModId, remoteFileId))} />}
+    {view === 'discover' && <DiscoverView snapshot={snapshot} onInstall={(provider, remoteModId, remoteFileId) => void run(() => window.csmm.installProviderMod(provider, remoteModId, remoteFileId))} onCreatePack={createModPack} onOpenCatalog={() => setView('catalog')} />}
     {view === 'catalog' && <CatalogView snapshot={snapshot} onInstall={(id) => void run(() => window.csmm.installCatalogMod(id))} onOpenLibrary={() => setView('library')} />}
-    {view === 'library' && <LibraryView snapshot={snapshot} onImport={() => void run(() => window.csmm.importLocalMod())} onRemove={(modId) => void run(() => window.csmm.removeInstalledMod(modId))} onShare={shareInstalledMod} />}
+    {view === 'library' && <LibraryView snapshot={snapshot} onImport={() => void run(() => window.csmm.importLocalMod())} onRemove={(modId) => void run(() => window.csmm.removeInstalledMod(modId))} onShare={shareInstalledMod} onInstallPack={(packId) => void run(() => window.csmm.installModPack(packId))} />}
     {view === 'server-cache' && <ServerCacheView cache={serverCache} loading={serverCacheLoading} onRefresh={() => void refreshServerCache()} onClean={() => void cleanServerCache()} />}
     {view === 'activity' && <section className="panel"><div className="section-heading"><div><h2>Activity</h2><p className="muted">Recent operation results and progress.</p></div><button className="secondary" onClick={() => void window.csmm.openManagedFolder()}>Open managed folder</button></div>{snapshot.activity.length === 0 && progress.length === 0 ? <p className="empty">No operations yet.</p> : <div className="list">{[...progress].reverse().map((item, index) => <div className="list-row" key={`${item.operationId}-${index}`}><div><strong>{item.stage}</strong><span>{item.message}</span></div></div>)}</div>}</section>}
   </main>

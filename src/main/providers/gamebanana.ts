@@ -1,8 +1,9 @@
-import type { ProviderBrowseRequest, ProviderFile, ProviderFileStatus, ProviderModDetails, ProviderModSummary, ProviderSearchResult } from '../../shared/contracts'
+import type { ProviderBrowseRequest, ProviderFile, ProviderFileStatus, ProviderModDetails, ProviderModSummary, ProviderSearchResult, SourceGameId } from '../../shared/contracts'
 import { AppError } from '../services/errors'
 import type { ModProvider, ProviderDownload } from './mod-provider'
 
-const GAME_ID = 2
+const GAME_IDS: Record<SourceGameId, number> = { 'counter-strike-source': 2, 'half-life-2': 9, 'day-of-defeat-source': 10, 'brainbread-source': 500 }
+const GAME_ID = GAME_IDS['counter-strike-source']
 const API_ROOT = 'https://gamebanana.com/apiv11'
 
 interface RecordValue { [key: string]: unknown }
@@ -57,18 +58,21 @@ function tags(value: unknown): string[] {
   return value.map((tag) => typeof tag === 'string' ? tag : stringValue(record(tag)._sName ?? record(tag)._sTitle ?? record(tag)._sValue)).filter((tag): tag is string => Boolean(tag))
 }
 
-function isCssRecord(value: unknown): boolean {
-  return numberValue(record(record(value)._aGame)._idRow) === GAME_ID
+function sourceGameId(value: unknown): SourceGameId | undefined {
+  const gameBananaId = numberValue(record(record(value)._aGame)._idRow)
+  return (Object.keys(GAME_IDS) as SourceGameId[]).find((gameId) => GAME_IDS[gameId] === gameBananaId)
 }
 
-function summary(value: unknown): ProviderModSummary | undefined {
+function summary(value: unknown, expectedGameId: SourceGameId = 'counter-strike-source'): ProviderModSummary | undefined {
   const item = record(value)
   const id = numberValue(item._idRow)
   const title = stringValue(item._sName)
-  if (id === undefined || !title || !isCssRecord(item)) return undefined
+  const gameId = sourceGameId(item)
+  if (id === undefined || !title || gameId !== expectedGameId) return undefined
   const category = stringValue(record(item._aRootCategory)._sName)
   return {
     provider: 'gamebanana',
+    gameId,
     remoteModId: String(id),
     title,
     author: stringValue(record(item._aSubmitter)._sName),
@@ -132,21 +136,23 @@ export class GameBananaProvider implements ModProvider {
     const page = Math.max(1, Math.floor(request.page))
     const perPage = Math.min(30, Math.max(1, Math.floor(request.perPage)))
     const query = request.query.trim()
+    const gameId = request.gameId ?? 'counter-strike-source'
+    const gameBananaId = GAME_IDS[gameId]
     const params = query
-      ? new URLSearchParams({ _sSearchString: query, _sModelName: 'Mod', _idGameRow: String(GAME_ID), _nPage: String(page), _nPerpage: String(perPage) })
-      : new URLSearchParams({ _nPage: String(page), _nPerpage: String(perPage), '_aFilters[Generic_Game]': String(GAME_ID), _sSort: 'Generic_LatestUpdated' })
+      ? new URLSearchParams({ _sSearchString: query, _sModelName: 'Mod', _idGameRow: String(gameBananaId), _nPage: String(page), _nPerpage: String(perPage) })
+      : new URLSearchParams({ _nPage: String(page), _nPerpage: String(perPage), '_aFilters[Generic_Game]': String(gameBananaId), _sSort: 'Generic_LatestUpdated' })
     const payload = await fetchJson(`${API_ROOT}/${query ? 'Util/Search/Results' : 'Mod/Index'}?${params.toString()}`)
     const { metadata, records } = browsePayload(payload)
-    const mods = records.map(summary).filter((item): item is ProviderModSummary => Boolean(item))
+    const mods = records.map((item) => summary(item, gameId)).filter((item): item is ProviderModSummary => Boolean(item))
     const total = metadata._nRecordCount as number
     return { provider: 'gamebanana', query: request.query, page, perPage, total, hasMore: metadata._bIsComplete !== true && page * perPage < total, mods }
   }
 
-  async getDetails(remoteModId: string): Promise<ProviderModDetails> {
+  async getDetails(remoteModId: string, gameId: SourceGameId = 'counter-strike-source'): Promise<ProviderModDetails> {
     if (!/^\d+$/.test(remoteModId)) throw new AppError('INVALID_REQUEST', 'Invalid GameBanana mod ID.')
     const payload = await fetchJson(`${API_ROOT}/Mod/${encodeURIComponent(remoteModId)}/ProfilePage`)
-    const base = summary(payload)
-    if (!base) throw new AppError('NOT_FOUND', 'The GameBanana mod was not found for Counter-Strike: Source.')
+    const base = summary(payload, gameId)
+    if (!base) throw new AppError('NOT_FOUND', 'The GameBanana mod was not found for the selected Source game.')
     if (!Array.isArray(payload._aFiles)) throw new AppError('NETWORK_ERROR', 'GameBanana returned an invalid mod detail response.')
     const checklist = payload._aLicenseChecklist
     const flatChecklist = Array.isArray(checklist)
@@ -163,6 +169,7 @@ export class GameBananaProvider implements ModProvider {
     const files = payload._aFiles.map((item) => file(item, canInstall)).filter((item): item is ProviderFile => Boolean(item))
     return { ...base, description: base.description || plainText(payload._sDescription), body: plainText(payload._sText, 12000), license: plainText(payload._sLicense, 1000) || undefined, files }
   }
+
 
   async resolveDownload(remoteModId: string, remoteFileId: string): Promise<ProviderDownload> {
     const details = await this.getDetails(remoteModId)

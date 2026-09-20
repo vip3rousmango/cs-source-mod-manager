@@ -1,9 +1,9 @@
 import { BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron'
 import { createWriteStream } from 'node:fs'
-import { mkdir, rename, rm, stat } from 'node:fs/promises'
+import { mkdir, readFile, rename, rm, stat } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
-import type { AppState, ModProfile, ModProviderId, ProgressEvent, ProviderBrowseRequest, Snapshot } from '../shared/contracts'
+import { SOURCE_GAMES, type AppState, type ModPackEntry, type ModProfile, type ModProviderId, type ProgressEvent, type ProviderBrowseRequest, type ProviderModDetails, type ProviderSearchResult, type Snapshot, type SourceGameId } from '../shared/contracts'
 import { parseProfile } from '../shared/validation'
 import { AppError, toAppError } from './services/errors'
 import { StateStore } from './services/state-store'
@@ -12,6 +12,7 @@ import { CatalogService } from './services/catalog'
 import { DeploymentService } from './services/deployment'
 import { importArchive, importFolder } from './services/archive-import'
 import { ServerCacheService } from './services/server-cache'
+import { ProviderCacheService } from './services/provider-cache'
 import { GameBananaProvider } from './providers/gamebanana'
 import type { ModProvider } from './providers/mod-provider'
 interface AppContext {
@@ -22,6 +23,7 @@ interface AppContext {
   deployment: DeploymentService
   providers: Map<ModProviderId, ModProvider>
   serverCache: ServerCacheService
+  providerCache: ProviderCacheService
   libraryRoot: string
   emit: (event: ProgressEvent) => void
 }
@@ -53,16 +55,42 @@ function enqueueMutation<T>(operation: () => Promise<T>): Promise<T> {
   return result
 }
 
-function parseProviderModRequest(value: unknown): { provider: ModProviderId; remoteModId: string; remoteFileId?: string } {
+function parseProviderModRequest(value: unknown): { provider: ModProviderId; remoteModId: string; remoteFileId?: string; gameId?: SourceGameId } {
   if (!value || typeof value !== 'object') throw new AppError('INVALID_REQUEST', 'Invalid provider mod request.')
-  const args = value as Partial<{ provider: ModProviderId; remoteModId: string; remoteFileId: string }>
+  const args = value as Partial<{ provider: ModProviderId; remoteModId: string; remoteFileId: string; gameId: SourceGameId }>
   if (args.provider !== 'gamebanana' || !/^\d{1,12}$/.test(args.remoteModId ?? '')) throw new AppError('INVALID_REQUEST', 'Invalid provider mod ID.')
   if (args.remoteFileId !== undefined && !/^\d{1,12}$/.test(args.remoteFileId)) throw new AppError('INVALID_REQUEST', 'Invalid provider file ID.')
-  return { provider: args.provider, remoteModId: args.remoteModId!, remoteFileId: args.remoteFileId }
+  if (args.gameId !== undefined && !SOURCE_GAMES.some((game) => game.id === args.gameId)) throw new AppError('INVALID_REQUEST', 'Invalid Source game.')
+  return { provider: args.provider, remoteModId: args.remoteModId!, remoteFileId: args.remoteFileId, gameId: args.gameId }
+}
+function parsePackEntries(value: unknown): ModPackEntry[] {
+  if (!Array.isArray(value) || value.length === 0 || value.length > 100) throw new AppError('INVALID_REQUEST', 'A mod pack needs between one and one hundred entries.')
+  const entries = value.map((candidate) => {
+    if (!candidate || typeof candidate !== 'object') throw new AppError('INVALID_REQUEST', 'Invalid mod pack entry.')
+    const entry = candidate as Partial<ModPackEntry>
+    if (entry.provider !== 'gamebanana' || !/^\d{1,12}$/.test(entry.remoteModId ?? '') || !/^\d{1,12}$/.test(entry.remoteFileId ?? '') || typeof entry.title !== 'string' || entry.title.trim().length === 0 || entry.title.length > 200) {
+      throw new AppError('INVALID_REQUEST', 'Invalid mod pack entry.')
+    }
+    return { provider: entry.provider, remoteModId: entry.remoteModId!, remoteFileId: entry.remoteFileId!, title: entry.title.trim() }
+  })
+  const identities = new Set(entries.map((entry) => `${entry.provider}:${entry.remoteModId}:${entry.remoteFileId}`))
+  if (identities.size !== entries.length) throw new AppError('INVALID_REQUEST', 'A mod pack cannot contain duplicate files.')
+  return entries
 }
 function parseCatalogId(value: unknown): string {
   if (typeof value !== 'string' || !/^[A-Za-z0-9._-]{1,120}$/.test(value) || value === '.' || value === '..') throw new AppError('INVALID_REQUEST', 'Invalid catalog mod ID.')
   return value
+}
+
+async function loadProviderFixture<T>(key: string): Promise<T | undefined> {
+  const fixturePath = process.env.CSMM_TEST_PROVIDER_FIXTURE
+  if (!fixturePath) return undefined
+  try {
+    const parsed = JSON.parse(await readFile(fixturePath, 'utf8')) as Record<string, unknown>
+    return parsed[key] as T
+  } catch (error) {
+    throw new AppError('NETWORK_ERROR', 'The provider test fixture could not be read safely.', error)
+  }
 }
 
 async function downloadCatalogArchive(context: AppContext, id: string): Promise<Snapshot> {
@@ -109,25 +137,29 @@ function getProvider(context: AppContext, providerId: ModProviderId): ModProvide
   if (!provider) throw new AppError('NOT_FOUND', `Mod provider ${providerId} is not available.`)
   return provider
 }
-
 function parseBrowseRequest(value: unknown): ProviderBrowseRequest {
   if (!value || typeof value !== 'object') throw new AppError('INVALID_REQUEST', 'Invalid provider browse request.')
   const request = value as Partial<ProviderBrowseRequest>
   if (request.provider !== 'gamebanana' || typeof request.query !== 'string') throw new AppError('INVALID_REQUEST', 'Invalid provider browse request.')
   if (request.query.length > 120) throw new AppError('INVALID_REQUEST', 'Provider search query is too long.')
+  if (request.gameId !== undefined && !SOURCE_GAMES.some((game) => game.id === request.gameId)) throw new AppError('INVALID_REQUEST', 'Invalid Source game.')
+  if (request.forceRefresh !== undefined && typeof request.forceRefresh !== 'boolean') throw new AppError('INVALID_REQUEST', 'Invalid provider refresh flag.')
   const page = request.page === undefined ? 1 : request.page
   const perPage = request.perPage === undefined ? 20 : request.perPage
   if (!Number.isSafeInteger(page) || page < 1 || !Number.isSafeInteger(perPage) || perPage < 1 || perPage > 30) throw new AppError('INVALID_REQUEST', 'Invalid provider pagination.')
-  return { provider: request.provider, query: request.query.trim(), page, perPage }
+  return { provider: request.provider, query: request.query.trim(), page, perPage, gameId: request.gameId ?? 'counter-strike-source', forceRefresh: request.forceRefresh === true }
 }
 
 async function downloadProviderArchive(context: AppContext, providerId: ModProviderId, remoteModId: string, remoteFileId: string): Promise<Snapshot> {
+  const downloadFixture = await loadProviderFixture<{ error?: unknown }>('download')
+  if (downloadFixture?.error) throw new AppError('NETWORK_ERROR', String(downloadFixture.error))
   assertWritable(context)
   const provider = getProvider(context, providerId)
-  const details = await provider.getDetails(remoteModId)
+  const details = await provider.getDetails(remoteModId, 'counter-strike-source')
+  if (details.gameId !== 'counter-strike-source') throw new AppError('UNSUPPORTED_FORMAT', 'Only Counter-Strike: Source content can be installed into this library.')
   const selected = details.files.find((file) => file.id === remoteFileId)
   if (!selected || !selected.installable) throw new AppError('UNSUPPORTED_FORMAT', 'The selected provider file is not an installable ZIP.')
-  const download = await provider.resolveDownload(remoteModId, remoteFileId)
+  const download = await provider.resolveDownload(remoteModId, remoteFileId, 'counter-strike-source')
   if (!download.checksumMd5) throw new AppError('CHECKSUM_MISMATCH', 'Provider did not provide a checksum for the selected file.')
   const operationId = `download-${providerId}-${remoteModId}-${remoteFileId}-${Date.now()}`
   context.emit({ operationId, stage: 'downloading', message: `Downloading ${details.title}`, bytesDone: 0, bytesTotal: download.sizeBytes || undefined })
@@ -216,17 +248,57 @@ export function registerIpc(context: AppContext): void {
   ipcMain.handle('installCatalogMod', guard((current, value: unknown) => enqueueMutation(() => downloadCatalogArchive(current, parseCatalogId(value)))))
   ipcMain.handle('browseProvider', guard(async (current, value: unknown) => {
     const request = parseBrowseRequest(value)
-    return getProvider(current, request.provider).browse(request)
+    const fixture = await loadProviderFixture<ProviderSearchResult>('browse')
+    if (fixture) return fixture
+    const cacheKey = `browse:${JSON.stringify({ provider: request.provider, gameId: request.gameId, query: request.query, page: request.page, perPage: request.perPage })}`
+    if (!request.forceRefresh) {
+      const cached = await current.providerCache.get<ProviderSearchResult>(cacheKey)
+      if (cached) return cached
+    }
+    const result = await getProvider(current, request.provider).browse(request)
+    await current.providerCache.set(cacheKey, result)
+    return result
   }))
-  ipcMain.handle('getProviderMod', guard((current, value: unknown) => {
+  ipcMain.handle('getProviderMod', guard(async (current, value: unknown) => {
     const args = parseProviderModRequest(value)
-    return getProvider(current, args.provider).getDetails(args.remoteModId)
+    const fixture = await loadProviderFixture<ProviderModDetails>('details')
+    if (fixture) return fixture
+    const gameId = args.gameId ?? 'counter-strike-source'
+    const cacheKey = `details:${args.provider}:${gameId}:${args.remoteModId}`
+    const cached = await current.providerCache.get<ProviderModDetails>(cacheKey)
+    if (cached) return cached
+    const result = await getProvider(current, args.provider).getDetails(args.remoteModId, gameId)
+    await current.providerCache.set(cacheKey, result)
+    return result
   }))
-  ipcMain.handle('installProviderMod', guard((current, value: unknown) => {
-    const args = parseProviderModRequest(value)
-    if (!args.remoteFileId) throw new AppError('INVALID_REQUEST', 'A provider file ID is required.')
-    return enqueueMutation(() => downloadProviderArchive(current, args.provider, args.remoteModId, args.remoteFileId!))
-  }))
+  ipcMain.handle('createModPack', guard((current, value: unknown) => enqueueMutation(async () => {
+    assertWritable(current)
+    if (!value || typeof value !== 'object') throw new AppError('INVALID_REQUEST', 'Invalid mod pack request.')
+    const request = value as { name?: unknown; entries?: unknown }
+    if (typeof request.name !== 'string' || request.name.trim().length === 0 || request.name.trim().length > 80) throw new AppError('INVALID_REQUEST', 'Pack name must be between one and eighty characters.')
+    const now = new Date().toISOString()
+    const pack = { id: `pack-${Date.now()}`, name: request.name.trim(), gameId: 'counter-strike-source' as const, entries: parsePackEntries(request.entries), createdAt: now, updatedAt: now }
+    const state = current.store.get()
+    await current.store.save({ ...state, modPacks: [...(state.modPacks ?? []), pack] })
+    return snapshot(current)
+  })))
+  ipcMain.handle('installModPack', guard((current, value: string) => enqueueMutation(async () => {
+    assertWritable(current)
+    if (typeof value !== 'string' || !/^pack-\d+$/.test(value)) throw new AppError('INVALID_REQUEST', 'Invalid mod pack ID.')
+    const pack = (current.store.get().modPacks ?? []).find((candidate) => candidate.id === value)
+    if (!pack) throw new AppError('NOT_FOUND', 'Mod pack was not found.')
+    const failures: Array<{ title: string; message: string }> = []
+    let completed = 0
+    for (const entry of pack.entries) {
+      try {
+        await downloadProviderArchive(current, entry.provider, entry.remoteModId, entry.remoteFileId)
+        completed += 1
+      } catch (error) {
+        failures.push({ title: entry.title, message: toAppError(error).message })
+      }
+    }
+    return { ...snapshot(current), packInstall: { packId: pack.id, completed, failures } }
+  })))
   ipcMain.handle('importLocalMod', guard((current) => enqueueMutation(async () => {
     assertWritable(current)
     const result = await dialog.showOpenDialog(current.window, { properties: ['openFile', 'openDirectory'], filters: [{ name: 'Mod files', extensions: ['zip', 'rar', '7z'] }] })

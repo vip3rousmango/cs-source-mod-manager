@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { IPCAPI, ModProfile, ProgressEvent, ProviderBrowseRequest } from '../shared/contracts'
+import type { IPCAPI, ModPackEntry, ModProfile, ProgressEvent, ProviderBrowseRequest } from '../shared/contracts'
 
 const api: IPCAPI = {
   getSnapshot: () => ipcRenderer.invoke('getSnapshot'),
@@ -8,8 +8,10 @@ const api: IPCAPI = {
   refreshCatalog: () => ipcRenderer.invoke('refreshCatalog'),
   installCatalogMod: (id) => ipcRenderer.invoke('installCatalogMod', id),
   browseProvider: (request: ProviderBrowseRequest) => ipcRenderer.invoke('browseProvider', request),
-  getProviderMod: (provider, remoteModId) => ipcRenderer.invoke('getProviderMod', { provider, remoteModId }),
+  getProviderMod: (provider, remoteModId, gameId) => ipcRenderer.invoke('getProviderMod', { provider, remoteModId, gameId }),
   installProviderMod: (provider, remoteModId, remoteFileId) => ipcRenderer.invoke('installProviderMod', { provider, remoteModId, remoteFileId }),
+  createModPack: (name: string, entries: ModPackEntry[]) => ipcRenderer.invoke('createModPack', { name, entries }),
+  installModPack: (packId: string) => ipcRenderer.invoke('installModPack', packId),
   importLocalMod: () => ipcRenderer.invoke('importLocalMod'),
   createProfile: (name) => ipcRenderer.invoke('createProfile', name),
   updateProfile: (profile: ModProfile) => ipcRenderer.invoke('updateProfile', profile),

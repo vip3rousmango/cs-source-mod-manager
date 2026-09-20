@@ -8,6 +8,7 @@ const emptyState: AppState = {
   settings: {},
   installedMods: [],
   profiles: [],
+  modPacks: [],
   activity: []
 }
 
@@ -25,7 +26,7 @@ export class StateStore {
       if (parsed.schemaVersion !== 1) {
         throw new AppError('RECOVERY_REQUIRED', 'State schema is not supported; preserve the state file before recovery.', { schemaVersion: parsed.schemaVersion })
       }
-      this.state = parsed
+      this.state = { ...parsed, modPacks: parsed.modPacks ?? [] }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         this.state = structuredClone(emptyState)

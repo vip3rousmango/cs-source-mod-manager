@@ -1,4 +1,4 @@
-import { _electron as electron, expect, test } from '@playwright/test'
+import { _electron as electron, expect, test, type ElectronApplication } from '@playwright/test'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -7,6 +7,18 @@ function electronExecutable(): string {
   if (process.platform === 'darwin') return join(process.cwd(), 'node_modules/electron/dist/Electron.app/Contents/MacOS/Electron')
   if (process.platform === 'win32') return join(process.cwd(), 'node_modules/electron/dist/electron.exe')
   return join(process.cwd(), 'node_modules/electron/dist/electron')
+}
+
+async function closeApplication(application: ElectronApplication): Promise<void> {
+  const child = application.process()
+  try { await application.evaluate(({ app }) => app.exit(0)) } catch {}
+  if (child.exitCode === null) {
+    await Promise.race([
+      new Promise<void>((resolve) => child.once('exit', () => resolve())),
+      new Promise<void>((resolve) => setTimeout(resolve, 3_000))
+    ])
+  }
+  if (child.exitCode === null) child.kill('SIGKILL')
 }
 
 test('launches the built Electron main process and browses a populated curated catalog', async () => {
@@ -33,13 +45,51 @@ test('launches the built Electron main process and browses a populated curated c
     await page.getByRole('button', { name: 'discover' }).click()
     await expect(page.getByRole('heading', { name: 'Find your next loadout.' })).toBeVisible()
     await expect(page.getByText('Your library starts here.')).toBeVisible()
+    await expect(page.getByRole('combobox', { name: 'Mod source' }).getByRole('option', { name: 'Bundled catalog' })).toHaveCount(1)
+    await page.getByRole('combobox', { name: 'Mod source' }).selectOption('catalog')
+    await expect(page.getByRole('heading', { name: 'Mod catalog' })).toBeVisible()
     await page.getByRole('button', { name: 'library' }).click()
     await expect(page.getByRole('heading', { name: 'My library' })).toBeVisible()
     await page.getByRole('button', { name: 'server downloads' }).click()
     await expect(page.getByRole('heading', { name: 'Downloads from servers' })).toBeVisible()
     await expect(page.getByText('Connect a game installation first.')).toBeVisible()
   } finally {
-    await application.close()
+    await closeApplication(application)
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+test('renders provider cards and falls back when a preview image fails', async () => {
+  const fixture = join(process.cwd(), 'test/fixtures/provider/provider.json')
+  const userData = await mkdtemp(join(tmpdir(), 'csmm-provider-fixture-e2e-'))
+  const application = await electron.launch({
+    executablePath: electronExecutable(),
+    args: [`--user-data-dir=${userData}`, join(process.cwd(), '.vite/build/index.js')],
+    env: { ...process.env, CSMM_TEST_PROVIDER_FIXTURE: fixture, CSMM_TEST_USER_DATA: userData }
+  })
+  try {
+    const page = await application.firstWindow()
+    await page.getByRole('button', { name: 'discover' }).click()
+    await page.getByRole('textbox', { name: 'Search GameBanana mods' }).fill('fixture')
+    await page.getByRole('button', { name: 'Search' }).click()
+    const firstResult = page.locator('.provider-card').first()
+    await expect(firstResult).toBeVisible()
+    const preview = firstResult.locator('img.provider-preview')
+    await expect(preview).toBeVisible()
+    await preview.evaluate((image) => image.dispatchEvent(new Event('error')))
+    await expect(firstResult.locator('.provider-art span')).toBeVisible()
+    await firstResult.click()
+    const details = page.locator('.provider-details')
+    await expect(details.getByRole('heading', { name: 'Files' })).toBeVisible()
+    const addToPackButtons = details.getByRole('button', { name: 'Add to pack' })
+    await addToPackButtons.nth(0).click()
+    await addToPackButtons.nth(1).click()
+    await page.getByRole('button', { name: 'Save pack' }).click()
+    await page.getByRole('button', { name: 'library' }).click()
+    await expect(page.getByRole('heading', { name: 'Mod packs' })).toBeVisible()
+    await page.getByRole('button', { name: 'Install full pack' }).click()
+    await expect(page.getByText('Pack installed 0 item(s); 2 failed.')).toBeVisible()
+  } finally {
+    await closeApplication(application)
     await rm(userData, { recursive: true, force: true })
   }
 })
@@ -64,10 +114,10 @@ test('browses and opens a live GameBanana result through the Electron bridge', a
     await preview.evaluate((image) => image.dispatchEvent(new Event('error')))
     await expect(firstResult.locator('.provider-art span')).toBeVisible()
     await firstResult.click()
-    await expect(page.getByRole('complementary').getByRole('heading').first()).toBeVisible({ timeout: 30_000 })
-    await expect(page.getByRole('complementary').getByText('Files', { exact: true })).toBeVisible()
+    await expect(page.locator('.provider-details').getByRole('heading').first()).toBeVisible({ timeout: 30_000 })
+    await expect(page.locator('.provider-details').getByRole('heading', { name: 'Files' })).toBeVisible()
   } finally {
-    await application.close()
+    await closeApplication(application)
     await rm(userData, { recursive: true, force: true })
   }
 })

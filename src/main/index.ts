@@ -7,6 +7,7 @@ import { CatalogService } from './services/catalog'
 import { DeploymentService } from './services/deployment'
 import { registerIpc, type AppContext } from './ipc'
 import { ServerCacheService } from './services/server-cache'
+import { ProviderCacheService } from './services/provider-cache'
 import { GameBananaProvider } from './providers/gamebanana'
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined
@@ -64,11 +65,12 @@ async function bootstrap(): Promise<void> {
   }
   const deployment = new DeploymentService(stateRoot, emit)
   const serverCache = new ServerCacheService()
+  const providerCache = new ProviderCacheService(join(libraryRoot, 'provider-cache'))
   const providers: AppContext['providers'] = new Map()
   providers.set('gamebanana', new GameBananaProvider())
   await deployment.recover()
   await createWindow()
-  const context: AppContext = { window: mainWindow!, store, steam, catalog, deployment, providers, serverCache, libraryRoot, emit }
+  const context: AppContext = { window: mainWindow!, store, steam, catalog, deployment, providers, serverCache, providerCache, libraryRoot, emit }
   registerIpc(context)
   app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) void createWindow() })
 }

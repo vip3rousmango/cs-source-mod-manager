@@ -1,4 +1,4 @@
-import type { ModProviderId, ProviderBrowseRequest, ProviderModDetails, ProviderSearchResult } from '../../shared/contracts'
+import type { ModProviderId, ProviderBrowseRequest, ProviderModDetails, ProviderSearchResult, SourceGameId } from '../../shared/contracts'
 
 export interface ProviderDownload {
   provider: ModProviderId
@@ -14,6 +14,6 @@ export interface ProviderDownload {
 export interface ModProvider {
   readonly id: ModProviderId
   browse(request: Omit<ProviderBrowseRequest, 'provider'>): Promise<ProviderSearchResult>
-  getDetails(remoteModId: string): Promise<ProviderModDetails>
-  resolveDownload(remoteModId: string, remoteFileId: string): Promise<ProviderDownload>
+  getDetails(remoteModId: string, gameId?: SourceGameId): Promise<ProviderModDetails>
+  resolveDownload(remoteModId: string, remoteFileId: string, gameId?: SourceGameId): Promise<ProviderDownload>
 }

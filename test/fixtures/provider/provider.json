@@ -1,0 +1,65 @@
+{
+  "browse": {
+    "provider": "gamebanana",
+    "query": "fixture",
+    "page": 1,
+    "perPage": 20,
+    "total": 1,
+    "hasMore": false,
+    "mods": [
+      {
+        "provider": "gamebanana",
+        "gameId": "counter-strike-source",
+        "remoteModId": "9001",
+        "title": "Fixture Tactical HUD",
+        "author": "CSMM Test",
+        "description": "Deterministic provider content for renderer smoke coverage.",
+        "tags": ["HUD"],
+        "category": "HUD",
+        "sourceUrl": "https://gamebanana.com/mods/9001",
+        "previewImageUrl": "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=",
+        "hasFiles": true
+      }
+    ]
+  },
+  "details": {
+    "provider": "gamebanana",
+    "gameId": "counter-strike-source",
+    "remoteModId": "9001",
+    "title": "Fixture Tactical HUD",
+    "author": "CSMM Test",
+    "description": "Deterministic provider content for renderer smoke coverage.",
+    "body": "A fixture mod with a verified ZIP.",
+    "tags": ["HUD"],
+    "category": "HUD",
+    "sourceUrl": "https://gamebanana.com/mods/9001",
+    "previewImageUrl": "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=",
+    "hasFiles": true,
+    "license": "CC BY",
+    "files": [
+      {
+        "id": "9002",
+        "name": "fixture-hud.zip",
+        "sizeBytes": 1024,
+        "format": "zip",
+        "version": "1.0",
+        "installable": true,
+        "status": "installable",
+        "checksumMd5": "0123456789abcdef0123456789abcdef"
+      },
+      {
+        "id": "9003",
+        "name": "fixture-hud-alt.zip",
+        "sizeBytes": 2048,
+        "format": "zip",
+        "version": "1.1",
+        "installable": true,
+        "status": "installable",
+        "checksumMd5": "fedcba9876543210fedcba9876543210"
+      }
+    ]
+  },
+  "download": {
+    "error": "Deterministic provider download failure."
+  }
+}

@@ -1,5 +1,13 @@
 export type GameId = 'counter-strike-source'
 export type ModSource = 'catalog' | 'provider' | 'local-folder' | 'local-zip'
+export type ModProviderId = 'gamebanana'
+export type SourceGameId = GameId | 'half-life-2' | 'day-of-defeat-source' | 'brainbread-source'
+export const SOURCE_GAMES: ReadonlyArray<{ id: SourceGameId; label: string; gameBananaId: number; installable: boolean }> = [
+  { id: 'counter-strike-source', label: 'Counter-Strike: Source', gameBananaId: 2, installable: true },
+  { id: 'half-life-2', label: 'Half-Life 2', gameBananaId: 9, installable: false },
+  { id: 'day-of-defeat-source', label: 'Day of Defeat: Source', gameBananaId: 10, installable: false },
+  { id: 'brainbread-source', label: 'BrainBread: Source', gameBananaId: 500, installable: false }
+]
 
 export interface GameInstallation {
   gameId: GameId
@@ -76,13 +84,13 @@ export interface CatalogManifest {
   entries: CatalogEntry[]
 }
 
-export type ModProviderId = 'gamebanana'
-
 export interface ProviderBrowseRequest {
   provider: ModProviderId
   query: string
   page: number
   perPage: number
+  gameId?: SourceGameId
+  forceRefresh?: boolean
 }
 
 export type ProviderFileStatus = 'installable' | 'unsupported-format' | 'archived' | 'scan-pending' | 'scan-failed' | 'checksum-missing' | 'permission-denied'
@@ -100,6 +108,7 @@ export interface ProviderFile {
 
 export interface ProviderModSummary {
   provider: ModProviderId
+  gameId: SourceGameId
   remoteModId: string
   title: string
   author?: string
@@ -126,6 +135,21 @@ export interface ProviderModDetails extends ProviderModSummary {
   license?: string
   files: ProviderFile[]
 }
+export interface ModPackEntry {
+  provider: ModProviderId
+  remoteModId: string
+  remoteFileId: string
+  title: string
+}
+
+export interface ModPack {
+  id: string
+  name: string
+  gameId: GameId
+  entries: ModPackEntry[]
+  createdAt: string
+  updatedAt: string
+}
 export interface ServerCacheItem {
   relativePath: string
   sizeBytes: number
@@ -147,13 +171,26 @@ export interface AppState {
   game?: GameInstallation
   installedMods: InstalledMod[]
   profiles: ModProfile[]
+  modPacks?: ModPack[]
   activeDeployment?: DeploymentManifest
   activity: ActivityRecord[]
+}
+
+export interface PackInstallFailure {
+  title: string
+  message: string
+}
+
+export interface PackInstallSummary {
+  packId: string
+  completed: number
+  failures: PackInstallFailure[]
 }
 
 export interface Snapshot extends AppState {
   catalog: CatalogManifest
   recoveryRequired?: string
+  packInstall?: PackInstallSummary
 }
 
 export type ActivityStatus = 'running' | 'success' | 'failure'
@@ -225,8 +262,10 @@ export interface IPCAPI {
   refreshCatalog(): Promise<Snapshot>
   installCatalogMod(id: string): Promise<Snapshot>
   browseProvider(request: ProviderBrowseRequest): Promise<ProviderSearchResult>
-  getProviderMod(provider: ModProviderId, remoteModId: string): Promise<ProviderModDetails>
+  getProviderMod(provider: ModProviderId, remoteModId: string, gameId?: SourceGameId): Promise<ProviderModDetails>
   installProviderMod(provider: ModProviderId, remoteModId: string, remoteFileId: string): Promise<Snapshot>
+  createModPack(name: string, entries: ModPackEntry[]): Promise<Snapshot>
+  installModPack(packId: string): Promise<Snapshot>
   importLocalMod(): Promise<Snapshot>
   createProfile(name: string): Promise<Snapshot>
   updateProfile(profile: ModProfile): Promise<Snapshot>
