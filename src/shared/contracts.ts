@@ -85,7 +85,7 @@ export interface ProviderBrowseRequest {
   perPage: number
 }
 
-export type ProviderFileStatus = 'installable' | 'unsupported-format' | 'archived' | 'scan-pending' | 'scan-failed'
+export type ProviderFileStatus = 'installable' | 'unsupported-format' | 'archived' | 'scan-pending' | 'scan-failed' | 'checksum-missing'
 
 export interface ProviderFile {
   id: string

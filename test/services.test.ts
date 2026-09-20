@@ -91,7 +91,7 @@ describe('GameBanana provider', () => {
       _aLicenseChecklist: [{ _sText: 'Download and install this Mod', _bValue: true }],
       _aGame: { _idRow: 2 },
       _aFiles: [
-        { _idRow: 21, _sFile: 'hud.zip', _nFilesize: 12, _sVersion: '1.0', _sDownloadUrl: 'https://gamebanana.com/dl/21', _sAvResult: 'clean', _sAnalysisResult: 'ok' },
+        { _idRow: 21, _sFile: 'hud.zip', _nFilesize: 12, _sVersion: '1.0', _sDownloadUrl: 'https://gamebanana.com/dl/21', _sAvResult: 'clean', _sAnalysisResult: 'ok', _sMd5Checksum: '0123456789abcdef0123456789abcdef' },
         { _idRow: 22, _sFile: 'hud.rar', _nFilesize: 12, _sDownloadUrl: 'https://gamebanana.com/dl/22', _sAvResult: 'clean', _sAnalysisResult: 'ok' }
       ]
     }), { status: 200, headers: { 'content-type': 'application/json' } }))
@@ -102,6 +102,22 @@ describe('GameBanana provider', () => {
       expect(details.license).toBe('CC BY')
       expect(details.files[0]).toMatchObject({ id: '21', installable: true, format: 'zip' })
       expect(details.files[1]).toMatchObject({ id: '22', installable: false, format: 'rar' })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+  it('ignores negative provider checklist entries', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      _idRow: 11,
+      _sName: 'CSS HUD',
+      _sProfileUrl: 'https://gamebanana.com/mods/11',
+      _aLicenseChecklist: { no: ['Download and install this Mod'] },
+      _aGame: { _idRow: 2 },
+      _aFiles: [{ _idRow: 21, _sFile: 'hud.zip', _nFilesize: 12, _sAvResult: 'clean', _sAnalysisResult: 'ok', _sMd5Checksum: '0123456789abcdef0123456789abcdef' }]
+    }), { status: 200 })))
+    try {
+      const details = await new GameBananaProvider().getDetails('11')
+      expect(details.files[0].installable).toBe(false)
     } finally {
       vi.unstubAllGlobals()
     }

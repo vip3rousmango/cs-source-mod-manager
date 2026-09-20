@@ -85,16 +85,18 @@ function file(value: unknown, canInstall: boolean): ProviderFile | undefined {
   const antivirus = stringValue(item._sAvResult)?.toLowerCase()
   const analysis = stringValue(item._sAnalysisResult)?.toLowerCase()
   const scanReady = antivirus === 'clean' && analysis === 'ok'
+  const checksumMd5 = typeof item._sMd5Checksum === 'string' && /^[0-9a-f]{32}$/i.test(item._sMd5Checksum) ? item._sMd5Checksum.toLowerCase() : undefined
   const status: ProviderFileStatus = archived
     ? 'archived'
     : format !== 'zip' || !canInstall
       ? 'unsupported-format'
       : antivirus === undefined || analysis === undefined
         ? 'scan-pending'
-        : scanReady
-          ? 'installable'
-          : 'scan-failed'
-  const checksumMd5 = typeof item._sMd5Checksum === 'string' && /^[0-9a-f]{32}$/i.test(item._sMd5Checksum) ? item._sMd5Checksum.toLowerCase() : undefined
+        : !scanReady
+          ? 'scan-failed'
+          : checksumMd5 === undefined
+            ? 'checksum-missing'
+            : 'installable'
   return { id: String(id), name, sizeBytes: numberValue(item._nFilesize) ?? 0, format, version: stringValue(item._sVersion), installable: status === 'installable', status, checksumMd5 }
 }
 
@@ -138,19 +140,14 @@ export class GameBananaProvider implements ModProvider {
     if (!base) throw new AppError('NOT_FOUND', 'The GameBanana mod was not found for Counter-Strike: Source.')
     if (!Array.isArray(payload._aFiles)) throw new AppError('NETWORK_ERROR', 'GameBanana returned an invalid mod detail response.')
     const checklist = payload._aLicenseChecklist
+    const flatChecklist = Array.isArray(checklist)
     const checklistRecord = record(checklist)
-    const checklistItems: unknown[] = Array.isArray(checklist)
-      ? checklist
-      : [
-          ...(Array.isArray(checklistRecord.yes) ? checklistRecord.yes : []),
-          ...(Array.isArray(checklistRecord.no) ? checklistRecord.no : [])
-        ]
+    const checklistItems: unknown[] = flatChecklist ? checklist : (Array.isArray(checklistRecord.yes) ? checklistRecord.yes : [])
     const canInstall = checklistItems.some((item) => {
-      if (typeof item === 'object' && item !== null) {
+      if (flatChecklist) {
+        if (typeof item !== 'object' || item === null) return false
         const itemRecord = record(item)
-        if (itemRecord._bValue !== undefined && itemRecord._bValue !== true) return false
-        const value = itemRecord._sText ?? itemRecord.text
-        return plainText(value).toLowerCase() === 'download and install this mod'
+        return itemRecord._bValue === true && plainText(itemRecord._sText ?? itemRecord.text).toLowerCase() === 'download and install this mod'
       }
       return plainText(item).toLowerCase() === 'download and install this mod'
     })

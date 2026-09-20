@@ -126,6 +126,7 @@ async function downloadProviderArchive(context: AppContext, providerId: ModProvi
   const selected = details.files.find((file) => file.id === remoteFileId)
   if (!selected || !selected.installable) throw new AppError('UNSUPPORTED_FORMAT', 'The selected provider file is not an installable ZIP.')
   const download = await provider.resolveDownload(remoteModId, remoteFileId)
+  if (!download.checksumMd5) throw new AppError('CHECKSUM_MISMATCH', 'Provider did not provide a checksum for the selected file.')
   const operationId = `download-${providerId}-${remoteModId}-${remoteFileId}-${Date.now()}`
   context.emit({ operationId, stage: 'downloading', message: `Downloading ${details.title}`, bytesDone: 0, bytesTotal: download.sizeBytes || undefined })
   const downloads = join(context.libraryRoot, 'downloads')
