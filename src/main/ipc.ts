@@ -14,6 +14,7 @@ import { importArchive, importFolder } from './services/archive-import'
 import { ServerCacheService } from './services/server-cache'
 import { ProviderCacheService } from './services/provider-cache'
 import { GameBananaProvider } from './providers/gamebanana'
+import { CommunityNewsService } from './services/community-news'
 import type { ModProvider } from './providers/mod-provider'
 interface AppContext {
   window: BrowserWindow
@@ -24,6 +25,7 @@ interface AppContext {
   providers: Map<ModProviderId, ModProvider>
   serverCache: ServerCacheService
   providerCache: ProviderCacheService
+  communityNews: CommunityNewsService
   libraryRoot: string
   emit: (event: ProgressEvent) => void
 }
@@ -31,13 +33,13 @@ interface AppContext {
 
 function ensureSender(event: Electron.IpcMainInvokeEvent, context: AppContext): void {
   if (event.sender !== context.window.webContents || event.senderFrame !== context.window.webContents.mainFrame) throw new AppError('INVALID_REQUEST', 'Invalid IPC sender.')
-  const frameUrl = event.senderFrame.url
-  let localFrame = frameUrl.startsWith('file://')
   try {
-    const parsed = new URL(frameUrl)
-    localFrame ||= parsed.protocol === 'http:' && (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1')
-  } catch {}
-  if (!localFrame) throw new AppError('INVALID_REQUEST', 'Invalid IPC frame origin.')
+    const frame = new URL(event.senderFrame.url)
+    const expected = new URL(context.window.webContents.getURL())
+    if (frame.protocol !== expected.protocol || frame.hostname !== expected.hostname || frame.port !== expected.port || frame.pathname !== expected.pathname) throw new Error('frame location mismatch')
+  } catch {
+    throw new AppError('INVALID_REQUEST', 'Invalid IPC frame origin.')
+  }
 }
 
 function snapshot(context: AppContext): Snapshot {
@@ -143,6 +145,19 @@ function getProvider(context: AppContext, providerId: ModProviderId): ModProvide
   const provider = context.providers.get(providerId)
   if (!provider) throw new AppError('NOT_FOUND', `Mod provider ${providerId} is not available.`)
   return provider
+}
+
+const PUBLIC_EXTERNAL_HOSTS = new Set(['store.steampowered.com', 'steamcommunity.com', 'gamebanana.com', 'api.gamebanana.com', 'moddb.com', 'www.moddb.com', 'rss.moddb.com', 'developer.valvesoftware.com'])
+
+function parsePublicExternalUrl(value: unknown): string {
+  if (typeof value !== 'string') throw new AppError('INVALID_REQUEST', 'Invalid external URL.')
+  try {
+    const url = new URL(value)
+    if (url.protocol !== 'https:' || url.username || url.password || url.port || !PUBLIC_EXTERNAL_HOSTS.has(url.hostname)) throw new Error('not approved')
+    return url.href
+  } catch {
+    throw new AppError('INVALID_REQUEST', 'External links are limited to approved HTTPS community sources.')
+  }
 }
 
 const GAMEBANANA_DOWNLOAD_HOST = /(^|\.)gamebanana\.com$/i
@@ -262,7 +277,7 @@ async function downloadProviderArchive(context: AppContext, providerId: ModProvi
 
 export function registerIpc(context: AppContext): void {
   const guard = <T>(handler: (context: AppContext, value: T) => Promise<unknown> | unknown) => async (event: Electron.IpcMainInvokeEvent, value: T) => {
-    try { ensureSender(event, context); return await handler(context, value) } catch (error) { throw toAppError(error).toShape() }
+    try { ensureSender(event, context); return await handler(context, value) } catch (error) { const appError = toAppError(error); const serialized = new Error(appError.message); serialized.name = appError.name; Object.assign(serialized, appError.toShape()); throw serialized }
   }
   ipcMain.handle('getSnapshot', guard((_context) => snapshot(context)))
   ipcMain.handle('discoverGame', guard((current) => enqueueMutation(async () => {
@@ -309,6 +324,11 @@ export function registerIpc(context: AppContext): void {
     await current.providerCache.set(cacheKey, result)
     return result
   }))
+  ipcMain.handle('installProviderMod', guard((current, value: unknown) => enqueueMutation(async () => {
+    const args = parseProviderModRequest(value)
+    if (!args.remoteFileId) throw new AppError('INVALID_REQUEST', 'A provider file is required.')
+    return downloadProviderArchive(current, args.provider, args.remoteModId, args.remoteFileId)
+  })))
   ipcMain.handle('createModPack', guard((current, value: unknown) => enqueueMutation(async () => {
     assertWritable(current)
     if (!value || typeof value !== 'object') throw new AppError('INVALID_REQUEST', 'Invalid mod pack request.')
@@ -320,6 +340,8 @@ export function registerIpc(context: AppContext): void {
     await current.store.save({ ...state, modPacks: [...(state.modPacks ?? []), pack] })
     return snapshot(current)
   })))
+  ipcMain.handle('getCommunityNews', guard((current, forceRefresh: unknown) => current.communityNews.getSnapshot(forceRefresh === true)))
+  ipcMain.handle('openExternal', guard((_current, value: unknown) => shell.openExternal(parsePublicExternalUrl(value))))
   ipcMain.handle('installModPack', guard((current, value: string) => enqueueMutation(async () => {
     assertWritable(current)
     if (typeof value !== 'string' || !/^pack-\d+$/.test(value)) throw new AppError('INVALID_REQUEST', 'Invalid mod pack ID.')

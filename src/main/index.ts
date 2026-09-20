@@ -9,7 +9,7 @@ import { registerIpc, type AppContext } from './ipc'
 import { ServerCacheService } from './services/server-cache'
 import { ProviderCacheService } from './services/provider-cache'
 import { GameBananaProvider } from './providers/gamebanana'
-
+import { CommunityNewsService } from './services/community-news'
 function getDevServerUrl(): string | undefined {
   if (app.isPackaged || !process.env.CSMM_DEV_SERVER_URL) return undefined
   try {
@@ -21,8 +21,9 @@ function getDevServerUrl(): string | undefined {
 }
 
 let mainWindow: BrowserWindow | undefined
+let appContext: AppContext | undefined
 
-async function createWindow(): Promise<void> {
+function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -42,6 +43,11 @@ async function createWindow(): Promise<void> {
   window.webContents.on('console-message', (details) => {
     if (details.level === 'error') console.error(`[renderer] ${details.message} (${details.sourceId}:${details.lineNumber})`)
   })
+  return window
+}
+
+async function loadWindow(window: BrowserWindow): Promise<void> {
+  const devServerUrl = getDevServerUrl()
   if (devServerUrl) await window.loadURL(devServerUrl)
   else await window.loadFile(join(__dirname, '../renderer/main_window/index.html'))
 }
@@ -76,13 +82,22 @@ async function bootstrap(): Promise<void> {
   const deployment = new DeploymentService(stateRoot, emit)
   const serverCache = new ServerCacheService()
   const providerCache = new ProviderCacheService(join(libraryRoot, 'provider-cache'))
+  const communityNews = new CommunityNewsService()
   const providers: AppContext['providers'] = new Map()
   providers.set('gamebanana', new GameBananaProvider())
   await deployment.recover()
-  await createWindow()
-  const context: AppContext = { window: mainWindow!, store, steam, catalog, deployment, providers, serverCache, providerCache, libraryRoot, emit }
+  const window = createWindow()
+  const context: AppContext = { window, store, steam, catalog, deployment, providers, serverCache, providerCache, communityNews, libraryRoot, emit }
+  appContext = context
   registerIpc(context)
-  app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) void createWindow() })
+  await loadWindow(window)
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      const nextWindow = createWindow()
+      if (appContext) appContext.window = nextWindow
+      void loadWindow(nextWindow)
+    }
+  })
 }
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })

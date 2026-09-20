@@ -25,7 +25,7 @@
     "test": "vitest",
     "test:e2e": "npm run package && playwright test",
     "package": "node scripts/ensure-electron.mjs && npm run build && electron-builder --dir --publish never",
-    "make": "node scripts/ensure-electron.mjs && npm run build && electron-builder",
+    "make": "node scripts/ensure-electron.mjs && npm run build && electron-builder --publish never",
     "release": "node scripts/ensure-electron.mjs && npm run build && electron-builder --publish never",
     "release:windows": "node scripts/ensure-electron.mjs && npm run build && electron-builder --publish never --win nsis portable",
     "release:linux": "node scripts/ensure-electron.mjs && npm run build && electron-builder --publish never --linux AppImage deb",

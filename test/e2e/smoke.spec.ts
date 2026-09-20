@@ -78,6 +78,9 @@ test('renders provider cards and falls back when a preview image fails', async (
     await firstResult.click()
     const details = page.locator('.provider-details')
     await expect(details.getByRole('heading', { name: 'Files' })).toBeVisible()
+    await details.getByRole('button', { name: 'Install' }).first().click()
+    await expect(page.locator('.alert.error').first()).toContainText('Deterministic provider download failure.')
+    await expect(page.getByRole('complementary', { name: 'Downloads manager' })).toContainText('Deterministic provider download failure.')
     const addToPackButtons = details.getByRole('button', { name: 'Add to pack' })
     await addToPackButtons.nth(0).click()
     await addToPackButtons.nth(1).click()
@@ -85,7 +88,7 @@ test('renders provider cards and falls back when a preview image fails', async (
     await page.getByRole('button', { name: 'collection' }).click()
     await expect(page.getByRole('heading', { name: 'Mod packs' })).toBeVisible()
     await page.getByRole('button', { name: 'Install full pack' }).click()
-    await expect(page.getByText('Pack installed 0 item(s); 2 failed.')).toBeVisible()
+    await expect(page.locator('.shell > .alert.error').first()).toContainText('Pack installed 0 item(s); 2 failed.')
   } finally {
     await closeApplication(application)
     await rm(userData, { recursive: true, force: true })

@@ -15,6 +15,12 @@ The project is a labour of love for Counter-Strike: Source. It aims for the safe
 
 The manager only changes its own directory under `cstrike/custom/CSMM_<profileId>`. Unmanaged game files are not part of deployment transactions.
 
+## Community discovery
+
+The **News** view aggregates public RSS/Atom feeds from Steam News, Steam Community announcements, GameBanana's Counter-Strike: Source feed, ModDB downloads/articles/addons, and the Valve Developer Community. Feed requests run in the main process, use HTTPS, follow only approved source hosts, cap response size and redirects, and render feed text as escaped content. The source directory remains available when a feed is temporarily offline.
+
+GameBanana is currently the first installable community provider. Provider downloads are limited to verified ZIP files, approved HTTPS redirects, size/checksum validation, and the manager-owned library path. Additional providers should be added through a focused issue with a documented public API/feed, attribution terms, file safety model, and fixture coverage; arbitrary scraping is intentionally out of scope.
+
 ## Development
 
 Requirements:
