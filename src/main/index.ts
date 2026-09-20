@@ -1,6 +1,5 @@
 import { app, BrowserWindow, session } from 'electron'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
 import { mkdir } from 'node:fs/promises'
 import { StateStore } from './services/state-store'
 import { SteamDiscoveryService } from './services/steam-discovery'
@@ -39,7 +38,7 @@ async function bootstrap(): Promise<void> {
   const store = new StateStore(join(stateRoot, 'state.json'))
   await store.load()
   const steam = new SteamDiscoveryService()
-  const catalogPath = app.isPackaged ? join(process.resourcesPath, 'catalog', 'manifest.json') : fileURLToPath(new URL('../../catalog/manifest.json', import.meta.url))
+  const catalogPath = join(app.isPackaged ? process.resourcesPath : process.cwd(), 'catalog', 'manifest.json')
   const catalog = new CatalogService(catalogPath)
   await catalog.load()
   const emit = (event: Parameters<NonNullable<Parameters<BrowserWindow['webContents']['send']>[1]>>[0]): void => {

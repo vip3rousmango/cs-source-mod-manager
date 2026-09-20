@@ -19,7 +19,7 @@
     "url": "https://github.com/vip3rousmango/cs-source-mod-manager/issues"
   },
   "scripts": {
-    "start": "electron-forge start",
+    "start": "node scripts/ensure-electron.mjs && electron-forge start",
     "typecheck": "tsc --noEmit",
     "test": "vitest",
     "test:e2e": "npm run package && playwright test",

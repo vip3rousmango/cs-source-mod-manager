@@ -11,7 +11,7 @@ npm test -- --run
 npm run package
 ```
 
-The Electron Playwright smoke test requires a complete local Electron runtime. If your package manager blocks Electron's postinstall download, repair the install before running `npm run test:e2e`.
+`npm start` verifies and, when necessary, downloads the matching Electron development runtime before launching Forge. If a corporate proxy or explicit `ELECTRON_SKIP_BINARY_DOWNLOAD` setting blocks that download, unset it or provide the Electron artifact through the normal npm cache.
 
 ## Project boundaries
 
