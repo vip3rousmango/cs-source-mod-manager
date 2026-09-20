@@ -6,7 +6,6 @@ interface FeedDefinition extends CommunityFeedSource {
 
 const FEEDS: FeedDefinition[] = [
   { id: 'steam-news', label: 'Steam News', description: 'Official Counter-Strike: Source news and updates.', feedUrl: 'https://store.steampowered.com/feeds/news/app/240/', siteUrl: 'https://store.steampowered.com/app/240/', allowedHosts: ['store.steampowered.com'] },
-  { id: 'steam-community', label: 'Steam Community', description: 'Community announcements for Counter-Strike: Source.', feedUrl: 'https://steamcommunity.com/games/240/rss/', siteUrl: 'https://steamcommunity.com/games/240/', allowedHosts: ['steamcommunity.com'] },
   { id: 'gamebanana-feed', label: 'GameBanana', description: 'New and updated Counter-Strike: Source submissions.', feedUrl: 'https://api.gamebanana.com/Rss/New?gameid=2&include_updated=1', siteUrl: 'https://gamebanana.com/games/2', allowedHosts: ['api.gamebanana.com', 'gamebanana.com'] },
   { id: 'moddb-downloads', label: 'ModDB Downloads', description: 'New Counter-Strike: Source downloads.', feedUrl: 'https://rss.moddb.com/games/counter-strike-source/downloads/feed/rss.xml', siteUrl: 'https://www.moddb.com/games/counter-strike-source/downloads', allowedHosts: ['rss.moddb.com', 'www.moddb.com'] },
   { id: 'moddb-articles', label: 'ModDB Articles', description: 'Articles and community updates from ModDB.', feedUrl: 'https://rss.moddb.com/games/counter-strike-source/articles/feed/rss.xml', siteUrl: 'https://www.moddb.com/games/counter-strike-source', allowedHosts: ['rss.moddb.com', 'www.moddb.com'] },
@@ -61,6 +60,28 @@ function validFeedUrl(feed: FeedDefinition, value: string): boolean {
     return false
   }
 }
+async function readFeedText(response: Response): Promise<string> {
+  if (!response.body) throw new Error('Feed response had no body.')
+  const decoder = new TextDecoder()
+  const chunks: string[] = []
+  let byteCount = 0
+  for await (const chunk of response.body as AsyncIterable<Uint8Array>) {
+    byteCount += chunk.byteLength
+    if (byteCount > MAX_FEED_BYTES) throw new Error('Feed response exceeded the safety limit.')
+    chunks.push(decoder.decode(chunk, { stream: true }))
+  }
+  chunks.push(decoder.decode())
+  return chunks.join('')
+}
+
+function isFeedDocument(xml: string): boolean {
+  return /^\s*(?:<\?xml[\s\S]*?\?>\s*)?(?:<!--[\s\S]*?-->\s*)*<(?:rss|feed|rdf:RDF)\b/i.test(xml)
+}
+
+function validFeedContentType(response: Response): boolean {
+  const contentType = response.headers.get('content-type')?.split(';', 1)[0]?.trim().toLowerCase()
+  return !contentType || contentType === 'application/rss+xml' || contentType === 'application/atom+xml' || contentType === 'application/xml' || contentType === 'text/xml' || contentType === 'application/rdf+xml' || contentType.endsWith('+xml')
+}
 
 async function fetchFeed(feed: FeedDefinition): Promise<CommunityFeedState & { items: CommunityNewsItem[] }> {
   const { allowedHosts: _allowedHosts, ...source } = feed
@@ -70,25 +91,24 @@ async function fetchFeed(feed: FeedDefinition): Promise<CommunityFeedState & { i
       if (!validFeedUrl(feed, currentUrl)) throw new Error('Feed redirect left the approved source host.')
       const controller = new AbortController()
       const timeout = setTimeout(() => controller.abort(), 8_000)
-      let response: Response
       try {
-        response = await fetch(currentUrl, { redirect: 'manual', signal: controller.signal, headers: { accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml' } })
+        const response = await fetch(currentUrl, { redirect: 'manual', signal: controller.signal, headers: { accept: 'application/rss+xml, application/atom+xml, application/xml, text/xml' } })
+        if (response.status >= 300 && response.status < 400) {
+          const location = response.headers.get('location')
+          await response.body?.cancel().catch(() => undefined)
+          if (!location) throw new Error('Feed returned an invalid redirect.')
+          currentUrl = new URL(location, currentUrl).href
+          continue
+        }
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        if (!validFeedContentType(response)) throw new Error('Feed returned a non-XML response.')
+        const xml = await readFeedText(response)
+        if (!isFeedDocument(xml)) throw new Error('Feed returned an invalid RSS or Atom document.')
+        const items = parseItems(feed, xml)
+        return { ...source, status: 'ok', itemCount: items.length, items }
       } finally {
         clearTimeout(timeout)
       }
-      if (response.status >= 300 && response.status < 400) {
-        const location = response.headers.get('location')
-        await response.body?.cancel().catch(() => undefined)
-        if (!location) throw new Error('Feed returned an invalid redirect.')
-        currentUrl = new URL(location, currentUrl).href
-        continue
-      }
-      if (!response.ok) throw new Error(`HTTP ${response.status}`)
-      const body = await response.arrayBuffer()
-      if (body.byteLength > MAX_FEED_BYTES) throw new Error('Feed response exceeded the safety limit.')
-      const xml = new TextDecoder().decode(body)
-      const items = parseItems(feed, xml)
-      return { ...source, status: 'ok', itemCount: items.length, items }
     }
     throw new Error('Feed returned too many redirects.')
   } catch (error) {

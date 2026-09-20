@@ -17,7 +17,7 @@ The manager only changes its own directory under `cstrike/custom/CSMM_<profileId
 
 ## Community discovery
 
-The **News** view aggregates public RSS/Atom feeds from Steam News, Steam Community announcements, GameBanana's Counter-Strike: Source feed, ModDB downloads/articles/addons, and the Valve Developer Community. Feed requests run in the main process, use HTTPS, follow only approved source hosts, cap response size and redirects, and render feed text as escaped content. The source directory remains available when a feed is temporarily offline.
+The **News** view aggregates public RSS/Atom feeds from Steam News, GameBanana's Counter-Strike: Source feed, ModDB downloads/articles/addons, and the Valve Developer Community. Steam's legacy Counter-Strike: Source Community RSS endpoint is retired and intentionally excluded. Feed requests run in the main process, use HTTPS, follow only approved source hosts, cap streamed response size and redirects, reject non-XML/error pages, and render feed text as escaped content. The source directory remains available when a feed is temporarily offline.
 
 GameBanana is currently the first installable community provider. Provider downloads are limited to verified ZIP files, approved HTTPS redirects, size/checksum validation, and the manager-owned library path. Additional providers should be added through a focused issue with a documented public API/feed, attribution terms, file safety model, and fixture coverage; arbitrary scraping is intentionally out of scope.
 

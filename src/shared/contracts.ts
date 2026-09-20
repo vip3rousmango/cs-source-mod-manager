@@ -165,7 +165,7 @@ export interface ServerCacheSnapshot {
   truncated: boolean
 }
 
-export type CommunityFeedId = 'steam-news' | 'steam-community' | 'gamebanana-feed' | 'moddb-downloads' | 'moddb-articles' | 'moddb-addons' | 'valve-developer'
+export type CommunityFeedId = 'steam-news' | 'gamebanana-feed' | 'moddb-downloads' | 'moddb-articles' | 'moddb-addons' | 'valve-developer'
 export type CommunityFeedStatus = 'ok' | 'error'
 export interface CommunityFeedSource {
   id: CommunityFeedId

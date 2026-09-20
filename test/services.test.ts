@@ -10,7 +10,7 @@ import { DeploymentService } from '../src/main/services/deployment'
 import { ProviderCacheService } from '../src/main/services/provider-cache'
 import { GameBananaProvider } from '../src/main/providers/gamebanana'
 import { fetchApprovedProviderDownload } from '../src/main/ipc'
-
+import { CommunityNewsService } from '../src/main/services/community-news'
 async function makeMod(root: string, name: string, value: string): Promise<InstalledMod> {
   const source = join(root, `${name}-source`)
   await mkdir(join(source, 'materials'), { recursive: true })
@@ -289,6 +289,52 @@ describe('profile deployment', () => {
       expect(await readFile(join(gameContent, 'custom', 'unmanaged', 'keep.txt'), 'utf8')).toBe('keep')
     } finally {
       await rm(root, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('community news feeds', () => {
+  const rss = (host: string): string => `<?xml version="1.0"?><rss version="2.0"><channel><item><title>Community update</title><link>https://${host}/news/1</link><description>Safe update</description></item></channel></rss>`
+
+  it('rejects HTML error pages and omits the retired Steam Community feed', async () => {
+    const fetchMock = vi.fn(async (input: string | URL) => {
+      const url = String(input)
+      if (url.includes('store.steampowered.com')) return new Response('<!doctype html><title>No group could be retrieved</title>', { status: 200, headers: { 'content-type': 'text/html' } })
+      const host = new URL(url).hostname
+      return new Response(rss(host), { status: 200, headers: { 'content-type': 'application/rss+xml' } })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      const snapshot = await new CommunityNewsService().getSnapshot(true)
+      expect(snapshot.feeds).toHaveLength(6)
+      expect(snapshot.feeds.map((feed) => feed.id)).toEqual(['steam-news', 'gamebanana-feed', 'moddb-downloads', 'moddb-articles', 'moddb-addons', 'valve-developer'])
+      expect(snapshot.feeds.find((feed) => feed.id === 'steam-news')).toMatchObject({ status: 'error', error: 'Feed returned a non-XML response.' })
+      expect(snapshot.items).toHaveLength(5)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('enforces the response byte cap while the feed is streaming', async () => {
+    const oversized = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new Uint8Array(600_000))
+        controller.enqueue(new Uint8Array(600_000))
+        controller.close()
+      }
+    })
+    const fetchMock = vi.fn(async (input: string | URL) => {
+      const url = String(input)
+      if (url.includes('store.steampowered.com')) return new Response(oversized, { status: 200, headers: { 'content-type': 'application/rss+xml' } })
+      const host = new URL(url).hostname
+      return new Response(rss(host), { status: 200, headers: { 'content-type': 'application/rss+xml' } })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      const snapshot = await new CommunityNewsService().getSnapshot(true)
+      expect(snapshot.feeds.find((feed) => feed.id === 'steam-news')).toMatchObject({ status: 'error', error: 'Feed response exceeded the safety limit.' })
+    } finally {
+      vi.unstubAllGlobals()
     }
   })
 })
