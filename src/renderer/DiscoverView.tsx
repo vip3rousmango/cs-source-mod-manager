@@ -23,7 +23,6 @@ export function DiscoverView({ snapshot, onInstall, onCreatePack, onOpenCatalog 
   const requestSequence = useRef(0)
   const installedIds = useMemo(() => new Set(snapshot.installedMods.filter((mod) => mod.source === 'provider').map((mod) => mod.id)), [snapshot.installedMods])
   const categories = useMemo(() => {
-    if (results?.categories?.length) return results.categories
     const counts = new Map<string, { value: string; count: number }>()
     for (const mod of results?.mods ?? []) {
       const value = mod.category?.trim()

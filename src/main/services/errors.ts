@@ -18,5 +18,6 @@ export class AppError extends Error {
 
 export function toAppError(error: unknown): AppError {
   if (error instanceof AppError) return error
+  if (error instanceof Error && error.name === 'AbortError') return new AppError('OPERATION_CANCELLED', 'Operation cancelled. No managed content was changed.')
   return new AppError('INTERNAL_ERROR', error instanceof Error ? error.message : 'Unexpected error')
 }

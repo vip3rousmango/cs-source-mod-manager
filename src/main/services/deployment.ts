@@ -53,7 +53,7 @@ export class DeploymentService {
     return { profileId, fileCount, conflicts, missingModIds, disabledModIds }
   }
 
-  async deploy(state: AppState, profileId: string, confirmConflicts: boolean): Promise<{ state: AppState; manifest: DeploymentManifest }> {
+  async deploy(state: AppState, profileId: string, confirmConflicts: boolean, operationId = profileId): Promise<{ state: AppState; manifest: DeploymentManifest }> {
     const preview = await this.preview(state, profileId)
     if (preview.missingModIds.length) throw new AppError('PROFILE_INVALID', 'Profile references missing mods.', preview.missingModIds)
     if (preview.conflicts.length && !confirmConflicts) throw new AppError('CONFLICT_CONFIRMATION_REQUIRED', 'Review and confirm the file conflicts before deploying.', preview.conflicts)

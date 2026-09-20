@@ -3,7 +3,7 @@ import { createWriteStream } from 'node:fs'
 import { mkdir, readFile, rename, rm, stat } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { join, resolve, sep as pathSeparator } from 'node:path'
-import { SOURCE_GAMES, type AppState, type ModPackEntry, type ModProfile, type ModProviderId, type ProgressEvent, type ProviderBrowseRequest, type ProviderModDetails, type ProviderSearchResult, type Snapshot, type SourceGameId } from '../shared/contracts'
+import { SOURCE_GAMES, type AppState, type GameInstallation, type ModPackEntry, type ModProfile, type ModProviderId, type ProgressEvent, type ProviderBrowseRequest, type ProviderModDetails, type ProviderSearchResult, type Snapshot, type SourceGameId } from '../shared/contracts'
 import { parseProfile } from '../shared/validation'
 import { AppError, toAppError } from './services/errors'
 import { StateStore } from './services/state-store'
@@ -29,6 +29,7 @@ interface AppContext {
   libraryRoot: string
   emit: (event: ProgressEvent) => void
   operationId?: string
+  abortController?: AbortController
 }
 
 function ensureSender(event: Electron.IpcMainInvokeEvent, context: AppContext): void {
@@ -45,7 +46,6 @@ function ensureSender(event: Electron.IpcMainInvokeEvent, context: AppContext): 
 function snapshot(context: AppContext): Snapshot {
   return { ...context.store.get(), catalog: context.catalog.get(), recoveryRequired: context.store.getRecoveryMessage() }
 }
-
 function assertWritable(context: AppContext): void {
   if (context.store.getRecoveryMessage()) throw new AppError('RECOVERY_REQUIRED', context.store.getRecoveryMessage()!)
 }
@@ -54,6 +54,17 @@ function managedModPath(context: AppContext, mod: AppState['installedMods'][numb
   const storageId = mod.storageId ?? mod.id
   if (!/^[A-Za-z0-9._-]+$/.test(storageId) || storageId === '.' || storageId === '..') throw new AppError('INTERNAL_ERROR', 'Installed mod storage metadata is invalid.')
   return join(context.libraryRoot, 'mods', storageId)
+}
+
+function safeManagedContentPath(context: AppContext, mod: AppState['installedMods'][number]): string {
+  const root = resolve(join(context.libraryRoot, 'mods'))
+  const target = resolve(mod.contentPath)
+  if (target !== root && !target.startsWith(`${root}${pathSeparator}`)) throw new AppError('INVALID_REQUEST', 'The installed mod content path is outside the manager library.')
+  return target
+}
+
+function throwIfCancelled(context: AppContext): void {
+  if (context.abortController?.signal.aborted) throw new AppError('OPERATION_CANCELLED', 'Operation cancelled. No managed content was changed.')
 }
 
 
@@ -75,6 +86,9 @@ export async function runTrackedMutation<T>(context: AppContext, operation: stri
     activity: [...state.activity.slice(-99), { id, operation, status: 'running', message: `${operation} started.`, startedAt }]
   })
   context.operationId = id
+  context.abortController = new AbortController()
+  const emit = context.emit
+  context.emit = (event) => emit({ ...event, operationId: id })
   try {
     const result = await callback()
     const current = context.store.get()
@@ -84,14 +98,17 @@ export async function runTrackedMutation<T>(context: AppContext, operation: stri
     })
     return result
   } catch (error) {
+    const appError = toAppError(error)
     const current = context.store.get()
     await context.store.save({
       ...current,
-      activity: current.activity.map((item) => item.id === id ? { ...item, status: 'failure', message: toAppError(error).message, finishedAt: new Date().toISOString() } : item)
+      activity: current.activity.map((item) => item.id === id ? { ...item, status: appError.code === 'OPERATION_CANCELLED' ? 'cancelled' : 'failure', message: appError.message, finishedAt: new Date().toISOString() } : item)
     })
     throw error
   } finally {
+    context.emit = emit
     context.operationId = undefined
+    context.abortController = undefined
   }
 }
 
@@ -145,7 +162,7 @@ async function downloadCatalogArchive(context: AppContext, id: string): Promise<
   const downloads = join(context.libraryRoot, 'downloads')
   await mkdir(downloads, { recursive: true })
   const archivePath = join(downloads, `${entry.id}-${entry.version}.zip`)
-  const response = await fetch(entry.archiveUrl)
+  const response = await fetch(entry.archiveUrl, { signal: context.abortController?.signal })
   if (!response.ok || !response.body) throw new AppError('NETWORK_ERROR', `Download failed with HTTP ${response.status}.`)
   if (!response.url.startsWith('https://')) throw new AppError('NETWORK_ERROR', 'Download redirected to an insecure URL.')
   const temporaryPath = `${archivePath}.partial`
@@ -154,6 +171,7 @@ async function downloadCatalogArchive(context: AppContext, id: string): Promise<
   let bytesDone = 0
   try {
     for await (const chunk of response.body as AsyncIterable<Uint8Array>) {
+      throwIfCancelled(context)
       bytesDone += chunk.byteLength
       if (bytesDone > entry.archiveSizeBytes || bytesDone > 2 * 1024 * 1024 * 1024) throw new AppError('CHECKSUM_MISMATCH', 'Download exceeded the catalog size limit.')
       hash.update(chunk)
@@ -169,7 +187,7 @@ async function downloadCatalogArchive(context: AppContext, id: string): Promise<
     await rm(temporaryPath, { force: true })
     throw error
   }
-  const installed = await importArchive(archivePath, { libraryRoot: context.libraryRoot, source: 'catalog', modId: entry.id, title: entry.title, version: entry.version, author: entry.author, description: entry.description, sourceUrl: entry.sourcePageUrl, expectedSha256: entry.archiveSha256, expectedSize: entry.archiveSizeBytes, contentRoot: entry.contentRoot, emit: context.emit })
+  const installed = await importArchive(archivePath, { libraryRoot: context.libraryRoot, source: 'catalog', modId: entry.id, title: entry.title, version: entry.version, author: entry.author, description: entry.description, sourceUrl: entry.sourcePageUrl, expectedSha256: entry.archiveSha256, expectedSize: entry.archiveSizeBytes, contentRoot: entry.contentRoot, signal: context.abortController?.signal, emit: context.emit })
   const state = context.store.get()
   const existing = state.installedMods.filter((mod) => mod.id !== installed.id)
   await context.store.save({ ...state, installedMods: [...existing, installed], settings: { catalogVersion: context.catalog.get().catalogVersion } })
@@ -206,11 +224,11 @@ function approvedGameBananaDownloadUrl(value: string): boolean {
   }
 }
 
-export async function fetchApprovedProviderDownload(providerId: ModProviderId, url: string): Promise<Response> {
+export async function fetchApprovedProviderDownload(providerId: ModProviderId, url: string, signal?: AbortSignal): Promise<Response> {
   let currentUrl = url
   for (let redirectCount = 0; redirectCount <= 5; redirectCount += 1) {
     if (providerId === 'gamebanana' && !approvedGameBananaDownloadUrl(currentUrl)) throw new AppError('NETWORK_ERROR', 'Provider redirected the download outside its approved domain.')
-    const response = await fetch(currentUrl, { redirect: 'manual' })
+    const response = await fetch(currentUrl, { redirect: 'manual', signal })
     if (response.status >= 300 && response.status < 400) {
       const location = response.headers.get('location')
       if (!location) throw new AppError('NETWORK_ERROR', 'Provider returned an invalid download redirect.')
@@ -255,7 +273,7 @@ async function downloadProviderArchive(context: AppContext, providerId: ModProvi
   const downloads = join(context.libraryRoot, 'downloads')
   await mkdir(downloads, { recursive: true })
   const archivePath = join(downloads, `${providerId}-${remoteModId}-${remoteFileId}.zip`)
-  const response = await fetchApprovedProviderDownload(providerId, download.url)
+  const response = await fetchApprovedProviderDownload(providerId, download.url, context.abortController?.signal)
   if (!response.ok || !response.body) throw new AppError('NETWORK_ERROR', `Download failed with HTTP ${response.status}.`)
   const temporaryPath = `${archivePath}.partial`
   const output = createWriteStream(temporaryPath, { flags: 'w' })
@@ -265,6 +283,7 @@ async function downloadProviderArchive(context: AppContext, providerId: ModProvi
   let archiveSha256: string | undefined
   try {
     for await (const chunk of response.body as AsyncIterable<Uint8Array>) {
+      throwIfCancelled(context)
       bytesDone += chunk.byteLength
       if (bytesDone > 2 * 1024 * 1024 * 1024 || (download.sizeBytes > 0 && bytesDone > download.sizeBytes)) throw new AppError('CHECKSUM_MISMATCH', 'Provider download exceeded the expected size.')
       hash.update(chunk)
@@ -303,6 +322,7 @@ async function downloadProviderArchive(context: AppContext, providerId: ModProvi
     expectedSize: download.sizeBytes || undefined,
     expectedSha256: archiveSha256,
     contentRoot: 'auto',
+    signal: context.abortController?.signal,
     emit: context.emit
   })
   const state = context.store.get()
@@ -323,9 +343,10 @@ export function registerIpc(context: AppContext): void {
   ipcMain.handle('discoverGame', guard((current) => enqueueTrackedMutation(current, 'Discover game', async () => {
     assertWritable(current)
     const candidates = await current.steam.discover()
-    if (!candidates[0]) throw new AppError('GAME_NOT_FOUND', 'Counter-Strike: Source was not found in the configured Steam libraries.')
     const state = current.store.get()
-    await current.store.save({ ...state, game: candidates[0] })
+    const counterStrike = candidates.find((candidate) => candidate.gameId === 'counter-strike-source') as GameInstallation | undefined
+    await current.store.save({ ...state, detectedGames: candidates, ...(counterStrike ? { game: counterStrike } : {}) })
+    if (!counterStrike) throw new AppError('GAME_NOT_FOUND', candidates.length ? 'Steam games were found, but Counter-Strike: Source was not among them. Choose its installation directory to continue.' : 'No supported Source games were found in the configured Steam libraries.')
     return snapshot(current)
   })))
   ipcMain.handle('chooseGameDirectory', guard((current) => enqueueTrackedMutation(current, 'Choose game directory', async () => {
@@ -334,7 +355,7 @@ export function registerIpc(context: AppContext): void {
     if (result.canceled || !result.filePaths[0]) return snapshot(current)
     const game = await current.steam.validateDirectory(result.filePaths[0])
     const state = current.store.get()
-    await current.store.save({ ...state, game })
+    await current.store.save({ ...state, game, detectedGames: [...state.detectedGames.filter((candidate) => candidate.installPath.toLowerCase() !== game.installPath.toLowerCase()), game] })
     return snapshot(current)
   })))
   ipcMain.handle('refreshCatalog', guard((current) => snapshot(current)))
@@ -403,16 +424,21 @@ export function registerIpc(context: AppContext): void {
     }
     return { ...snapshot(current), packInstall: { packId: pack.id, completed, failures } }
   })))
-  ipcMain.handle('importLocalMod', guard((current) => enqueueTrackedMutation(current, 'Import local mod', async () => {
+  ipcMain.handle('importLocalMod', guard((current, value: unknown) => enqueueTrackedMutation(current, 'Import local mod', async () => {
     assertWritable(current)
-    const result = await dialog.showOpenDialog(current.window, { properties: ['openFile', 'openDirectory'], filters: [{ name: 'Mod files', extensions: ['zip', 'rar', '7z'] }] })
+    const kind = value === 'archive' || value === 'folder' ? value : undefined
+    const result = await dialog.showOpenDialog(current.window, {
+      properties: kind === 'archive' ? ['openFile'] : kind === 'folder' ? ['openDirectory'] : ['openFile', 'openDirectory'],
+      filters: kind === 'folder' ? undefined : [{ name: 'ZIP archives', extensions: ['zip'] }, { name: 'All files', extensions: ['*'] }],
+      title: kind === 'archive' ? 'Import a ZIP archive' : kind === 'folder' ? 'Import an extracted mod folder' : 'Import a mod'
+    })
     if (result.canceled || !result.filePaths[0]) return snapshot(current)
     const selected = result.filePaths[0]
     const sourceStat = await stat(selected)
     const installed = sourceStat.isDirectory()
-      ? await importFolder(selected, { libraryRoot: current.libraryRoot })
+      ? await importFolder(selected, { libraryRoot: current.libraryRoot, signal: current.abortController?.signal, emit: current.emit })
       : selected.toLowerCase().endsWith('.zip')
-        ? await importArchive(selected, { libraryRoot: current.libraryRoot, source: 'local-zip' })
+        ? await importArchive(selected, { libraryRoot: current.libraryRoot, source: 'local-zip', signal: current.abortController?.signal, emit: current.emit })
         : (() => { throw new AppError('UNSUPPORTED_FORMAT', 'Only extracted folders and ZIP archives are supported.') })()
     const state = current.store.get()
     await current.store.save({ ...state, installedMods: [...state.installedMods.filter((mod) => mod.id !== installed.id), installed] })
@@ -438,7 +464,7 @@ export function registerIpc(context: AppContext): void {
   ipcMain.handle('previewProfile', guard((current, profileId: string) => current.deployment.preview(current.store.get(), profileId)))
   ipcMain.handle('deployProfile', guard((current, args: { profileId: string; confirmConflicts: boolean }) => enqueueTrackedMutation(current, 'Deploy profile', async () => {
     assertWritable(current)
-    const result = await current.deployment.deploy(current.store.get(), args.profileId, args.confirmConflicts)
+    const result = await current.deployment.deploy(current.store.get(), args.profileId, args.confirmConflicts, current.operationId)
     await current.store.save(result.state)
     return snapshot(current)
   })))
@@ -448,10 +474,22 @@ export function registerIpc(context: AppContext): void {
     if (state.profiles.some((profile) => profile.entries.some((entry) => entry.modId === modId))) throw new AppError('MOD_IN_USE', 'Remove the mod from every profile before uninstalling it.')
     const mod = state.installedMods.find((candidate) => candidate.id === modId)
     if (!mod) throw new AppError('NOT_FOUND', 'Installed mod was not found.')
+    safeManagedContentPath(current, mod)
     await rm(managedModPath(current, mod), { recursive: true, force: true })
     await current.store.save({ ...state, installedMods: state.installedMods.filter((candidate) => candidate.id !== modId) })
     return snapshot(current)
   })))
+  ipcMain.handle('openInstalledModFolder', guard(async (current, modId: string) => {
+    const mod = current.store.get().installedMods.find((candidate) => candidate.id === modId)
+    if (!mod) throw new AppError('NOT_FOUND', 'Installed mod was not found.')
+    const error = await shell.openPath(safeManagedContentPath(current, mod))
+    if (error) throw new AppError('PERMISSION_DENIED', `Could not open the installed mod folder: ${error}`)
+  }))
+  ipcMain.handle('cancelOperation', guard((current, operationId: string) => {
+    if (typeof operationId !== 'string' || operationId !== current.operationId || !current.abortController) return false
+    current.abortController.abort()
+    return true
+  }))
   ipcMain.handle('shareInstalledMod', guard((current, modId: string) => {
     const mod = current.store.get().installedMods.find((candidate) => candidate.id === modId)
     if (!mod) throw new AppError('NOT_FOUND', 'Installed mod was not found.')

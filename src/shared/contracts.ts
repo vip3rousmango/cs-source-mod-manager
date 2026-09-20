@@ -2,15 +2,23 @@ export type GameId = 'counter-strike-source'
 export type ModSource = 'catalog' | 'provider' | 'local-folder' | 'local-zip'
 export type ModProviderId = 'gamebanana'
 export type SourceGameId = GameId | 'half-life-2' | 'day-of-defeat-source' | 'brainbread-source'
-export const SOURCE_GAMES: ReadonlyArray<{ id: SourceGameId; label: string; gameBananaId: number; installable: boolean }> = [
-  { id: 'counter-strike-source', label: 'Counter-Strike: Source', gameBananaId: 2, installable: true },
-  { id: 'half-life-2', label: 'Half-Life 2', gameBananaId: 9, installable: false },
-  { id: 'day-of-defeat-source', label: 'Day of Defeat: Source', gameBananaId: 10, installable: false },
-  { id: 'brainbread-source', label: 'BrainBread: Source', gameBananaId: 500, installable: false }
+export const SOURCE_GAMES: ReadonlyArray<{ id: SourceGameId; label: string; gameBananaId: number; steamAppId?: number; contentDirectory: string; installable: boolean }> = [
+  { id: 'counter-strike-source', label: 'Counter-Strike: Source', gameBananaId: 2, steamAppId: 240, contentDirectory: 'cstrike', installable: true },
+  { id: 'half-life-2', label: 'Half-Life 2', gameBananaId: 9, steamAppId: 220, contentDirectory: 'hl2', installable: false },
+  { id: 'day-of-defeat-source', label: 'Day of Defeat: Source', gameBananaId: 10, steamAppId: 300, contentDirectory: 'dod', installable: false },
+  { id: 'brainbread-source', label: 'BrainBread: Source', gameBananaId: 500, contentDirectory: 'brainbread', installable: false }
 ]
 
 export interface GameInstallation {
   gameId: GameId
+  steamRoot: string
+  installPath: string
+  contentPath: string
+  detectedAt: string
+}
+
+export interface DetectedSourceInstallation {
+  gameId: SourceGameId
   steamRoot: string
   installPath: string
   contentPath: string
@@ -33,6 +41,7 @@ export interface InstalledMod {
   archiveSha256?: string
   installedAt: string
   sourceUrl?: string
+  installationNotes?: string
 }
 
 export interface ProfileEntry {
@@ -120,11 +129,6 @@ export interface ProviderModSummary {
   hasFiles: boolean
 }
 
-export interface ProviderCategory {
-  value: string
-  count: number
-}
-
 export interface ProviderSearchResult {
   provider: ModProviderId
   query: string
@@ -132,7 +136,6 @@ export interface ProviderSearchResult {
   perPage: number
   total: number
   hasMore: boolean
-  categories: ProviderCategory[]
   mods: ProviderModSummary[]
 }
 
@@ -208,11 +211,11 @@ export interface CommunityNewsSnapshot {
   items: CommunityNewsItem[]
   feeds: CommunityFeedState[]
 }
-
 export interface AppState {
   schemaVersion: 1
   settings: { catalogVersion?: string }
   game?: GameInstallation
+  detectedGames: DetectedSourceInstallation[]
   installedMods: InstalledMod[]
   profiles: ModProfile[]
   modPacks?: ModPack[]
@@ -237,7 +240,7 @@ export interface Snapshot extends AppState {
   packInstall?: PackInstallSummary
 }
 
-export type ActivityStatus = 'running' | 'success' | 'failure'
+export type ActivityStatus = 'running' | 'success' | 'failure' | 'cancelled'
 export interface ActivityRecord {
   id: string
   operation: string
@@ -274,6 +277,7 @@ export type AppErrorCode =
   | 'DEPLOYMENT_INTERRUPTED'
   | 'RECOVERY_REQUIRED'
   | 'MOD_IN_USE'
+  | 'OPERATION_CANCELLED'
   | 'NOT_FOUND'
   | 'INTERNAL_ERROR'
 
@@ -298,7 +302,6 @@ export interface OperationResult<T = undefined> {
   ok: true
   value: T
 }
-
 export interface IPCAPI {
   getSnapshot(): Promise<Snapshot>
   toggleFullscreen(): Promise<boolean>
@@ -311,20 +314,23 @@ export interface IPCAPI {
   installProviderMod(provider: ModProviderId, remoteModId: string, remoteFileId: string): Promise<Snapshot>
   createModPack(name: string, entries: ModPackEntry[]): Promise<Snapshot>
   installModPack(packId: string): Promise<Snapshot>
-  importLocalMod(): Promise<Snapshot>
+  importLocalMod(kind?: 'archive' | 'folder'): Promise<Snapshot>
   createProfile(name: string): Promise<Snapshot>
   updateProfile(profile: ModProfile): Promise<Snapshot>
   previewProfile(profileId: string): Promise<DeploymentPreview>
   deployProfile(profileId: string, confirmConflicts: boolean): Promise<Snapshot>
   removeInstalledMod(modId: string): Promise<Snapshot>
+  openInstalledModFolder(modId: string): Promise<void>
   openManagedFolder(): Promise<void>
   shareInstalledMod(modId: string): Promise<void>
+  cancelOperation(operationId: string): Promise<boolean>
   getServerCache(): Promise<ServerCacheSnapshot>
   cleanServerCache(confirm: boolean): Promise<ServerCacheSnapshot>
   getCommunityNews(forceRefresh?: boolean): Promise<CommunityNewsSnapshot>
   getCommunityNewsArticle(id: string): Promise<CommunityNewsArticle>
   openExternal(url: string): Promise<void>
   subscribeToProgress(listener: (event: ProgressEvent) => void): () => void
+  subscribeToFullscreen(listener: (fullscreen: boolean) => void): () => void
 }
 
 declare global {

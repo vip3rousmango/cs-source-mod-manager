@@ -6,6 +6,7 @@ import { AppError } from './errors'
 const emptyState: AppState = {
   schemaVersion: 1,
   settings: {},
+  detectedGames: [],
   installedMods: [],
   profiles: [],
   modPacks: [],
@@ -30,8 +31,7 @@ export class StateStore {
       const activity = (parsed.activity ?? []).map((item) => item.status === 'running'
         ? { ...item, status: 'failure' as const, message: 'Operation was interrupted before completion.', finishedAt: interruptedAt }
         : item)
-      this.state = { ...parsed, modPacks: parsed.modPacks ?? [], activity }
-      if (activity.some((item, index) => item !== (parsed.activity ?? [])[index])) await this.save(this.state)
+      this.state = { ...parsed, detectedGames: parsed.detectedGames ?? [], modPacks: parsed.modPacks ?? [], activity }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         this.state = structuredClone(emptyState)

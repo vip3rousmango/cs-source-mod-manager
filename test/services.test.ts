@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { AppState, GameInstallation, InstalledMod, ModProfile } from '../src/shared/contracts'
+import type { AppState, GameInstallation, InstalledMod, ModProfile, ProgressEvent } from '../src/shared/contracts'
 import { assertSafeRelativePath, parseCatalog } from '../src/shared/validation'
 import { importArchive, importFolder } from '../src/main/services/archive-import'
 import { StateStore } from '../src/main/services/state-store'
@@ -11,17 +11,24 @@ import { ServerCacheService } from '../src/main/services/server-cache'
 import { ProviderCacheService } from '../src/main/services/provider-cache'
 import { GameBananaProvider } from '../src/main/providers/gamebanana'
 import { fetchApprovedProviderDownload, runTrackedMutation, type AppContext } from '../src/main/ipc'
+import { SteamDiscoveryService } from '../src/main/services/steam-discovery'
 import { CommunityNewsService } from '../src/main/services/community-news'
-const WRAPPED_CONTENT_ARCHIVE = `UEsDBAoAAAAAAJ16NF0AAAAAAAAAAAAAAAAIABwAY3N0cmlrZS9VVAkAAxoysGoaMrBqdXgLAAEE
-9QEAAAQUAAAAUEsDBAoAAAAAAJ16NF0AAAAAAAAAAAAAAAASABwAY3N0cmlrZS9tYXRlcmlhbHMv
-VVQJAAMaMrBqGjKwanV4CwABBPUBAAAEFAAAAFBLAwQKAAAAAACdejRdTBYE7Q8AAAAPAAAAGgAc
-AGNzdHJpa2UvbWF0ZXJpYWxzL3Rlc3Qudm10VVQJAAMaMrBqGjKwanV4CwABBPUBAAAEFAAAAFVu
-bGl0R2VuZXJpY3t9ClBLAQIeAwoAAAAAAJ16NF0AAAAAAAAAAAAAAAAIABgAAAAAAAAAEADtQQAA
-AABjc3RyaWtlL1VUBQADGjKwanV4CwABBPUBAAAEFAAAAFBLAQIeAwoAAAAAAJ16NF0AAAAAAAAA
-AAAAAAASABgAAAAAAAAAEADtQUIAAABjc3RyaWtlL21hdGVyaWFscy9VVAUAAxoysGp1eAsAAQT1
-AQAABBQAAABQSwECHgMKAAAAAACdejRdTBYE7Q8AAAAPAAAAGgAYAAAAAAABAAAApIGOAAAAY3N0
-cmlrZS9tYXRlcmlhbHMvdGVzdC52bXRVVAUAAxoysGp1eAsAAQT1AQAABBQAAABQSwUGAAAAAAMA
-AwAGAQAA8QAAAAAA`.replace(/\s/g, '')
+const WRAPPED_CONTENT_ARCHIVE = `UEsDBAoAAAAAACaFNF0AAAAAAAAAAAAAAAAIABwAY3N0cmlrZS9VVAkAA+dEsGroRLBqdXgLAAEE
+9QEAAAQUAAAAUEsDBAoAAAAAACaFNF0AAAAAAAAAAAAAAAAPABwAY3N0cmlrZS9jdXN0b20vVVQJ
+AAPnRLBq6ESwanV4CwABBPUBAAAEFAAAAFBLAwQKAAAAAAAmhTRdAAAAAAAAAAAAAAAAFAAcAGNz
+dHJpa2UvY3VzdG9tL2RlbW8vVVQJAAPnRLBq6ESwanV4CwABBPUBAAAEFAAAAFBLAwQKAAAAAAAm
+hTRdAAAAAAAAAAAAAAAAHgAcAGNzdHJpa2UvY3VzdG9tL2RlbW8vbWF0ZXJpYWxzL1VUCQAD50Sw
+auhEsGp1eAsAAQT1AQAABBQAAABQSwMECgAAAAAAJoU0XUwWBO0PAAAADwAAACYAHABjc3RyaWtl
+L2N1c3RvbS9kZW1vL21hdGVyaWFscy90ZXN0LnZtdFVUCQAD50SwaudEsGp1eAsAAQT1AQAABBQA
+AABVbmxpdEdlbmVyaWN7fQpQSwECHgMKAAAAAAAmhTRdAAAAAAAAAAAAAAAACAAYAAAAAAAAABAA
+7UEAAAAAY3N0cmlrZS9VVAUAA+dEsGp1eAsAAQT1AQAABBQAAABQSwECHgMKAAAAAAAmhTRdAAAA
+AAAAAAAAAAAADwAYAAAAAAAAABAA7UFCAAAAY3N0cmlrZS9jdXN0b20vVVQFAAPnRLBqdXgLAAEE
+9QEAAAQUAAAAUEsBAh4DCgAAAAAAJoU0XQAAAAAAAAAAAAAAABQAGAAAAAAAAAAQAO1BiwAAAGNz
+dHJpa2UvY3VzdG9tL2RlbW8vVVQFAAPnRLBqdXgLAAEE9QEAAAQUAAAAUEsBAh4DCgAAAAAAJoU0
+XQAAAAAAAAAAAAAAAB4AGAAAAAAAAAAQAO1B2QAAAGNzdHJpa2UvY3VzdG9tL2RlbW8vbWF0ZXJp
+YWxzL1VUBQAD50SwanV4CwABBPUBAAAEFAAAAFBLAQIeAwoAAAAAACaFNF1MFgTtDwAAAA8AAAAm
+ABgAAAAAAAEAAACkgTEBAABjc3RyaWtlL2N1c3RvbS9kZW1vL21hdGVyaWFscy90ZXN0LnZtdFVU
+BQAD50SwanV4CwABBPUBAAAEFAAAAFBLBQYAAAAABQAFAM0BAACgAQAAAAA=`.replace(/\s/g, '')
 async function makeMod(root: string, name: string, value: string): Promise<InstalledMod> {
   const source = join(root, `${name}-source`)
   await mkdir(join(source, 'materials'), { recursive: true })
@@ -80,6 +87,55 @@ describe('archive and catalog boundaries', () => {
       await rm(root, { recursive: true, force: true })
     }
   })
+  it('cancels before extraction without creating managed content', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'csmm-provider-cancel-'))
+    try {
+      const archivePath = join(root, 'wrapped.zip')
+      await writeFile(archivePath, Buffer.from(WRAPPED_CONTENT_ARCHIVE, 'base64'))
+      const controller = new AbortController()
+      controller.abort()
+      await expect(importArchive(archivePath, { libraryRoot: join(root, 'library'), source: 'provider', signal: controller.signal })).rejects.toMatchObject({ code: 'OPERATION_CANCELLED' })
+      await expect(readFile(join(root, 'library', 'mods', 'gamebanana-11-21', '21', 'content', 'materials', 'test.vmt'))).rejects.toThrow()
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+  it('cancels folder import without deleting an existing managed copy', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'csmm-folder-cancel-'))
+    try {
+      const source = join(root, 'source')
+      const content = join(root, 'library', 'mods', 'source', 'local', 'content')
+      await mkdir(join(source, 'materials'), { recursive: true })
+      await mkdir(join(content, 'materials'), { recursive: true })
+      await writeFile(join(source, 'materials', 'test.vmt'), 'new')
+      await writeFile(join(content, 'materials', 'test.vmt'), 'old')
+      const controller = new AbortController()
+      controller.abort()
+      await expect(importFolder(source, { libraryRoot: join(root, 'library'), signal: controller.signal })).rejects.toMatchObject({ code: 'OPERATION_CANCELLED' })
+      expect(await readFile(join(content, 'materials', 'test.vmt'), 'utf8')).toBe('old')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+})
+describe('Steam Source game discovery', () => {
+  it('detects supported Source games across one Steam library without changing the CSS deployment target', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'csmm-steam-'))
+    try {
+      const steamApps = join(root, 'steamapps')
+      const css = join(steamApps, 'common', 'Counter-Strike Source', 'cstrike')
+      const dod = join(steamApps, 'common', 'Day of Defeat Source', 'dod')
+      await mkdir(css, { recursive: true })
+      await mkdir(dod, { recursive: true })
+      await writeFile(join(steamApps, 'appmanifest_240.acf'), '"appid" "240"\n"installdir" "Counter-Strike Source"\n"name" "Counter-Strike: Source"')
+      await writeFile(join(steamApps, 'appmanifest_300.acf'), '"appid" "300"\n"installdir" "Day of Defeat Source"\n"name" "Day of Defeat: Source"')
+      const candidates = await new SteamDiscoveryService([root]).discover()
+      expect(candidates.map((candidate) => candidate.gameId)).toEqual(['counter-strike-source', 'day-of-defeat-source'])
+      expect(candidates.find((candidate) => candidate.gameId === 'day-of-defeat-source')?.contentPath).toBe(dod)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
 })
 
 describe('activity persistence', () => {
@@ -91,6 +147,7 @@ describe('activity persistence', () => {
       await store.save({
         schemaVersion: 1,
         settings: {},
+        detectedGames: [],
         installedMods: [],
         profiles: [],
         activity: [{ id: 'operation-1', operation: 'Install community mod', status: 'running', message: 'Install community mod started.', startedAt: new Date(0).toISOString() }]
@@ -118,7 +175,22 @@ describe('activity persistence', () => {
       await rm(root, { recursive: true, force: true })
     }
   })
-})
+  it('normalizes progress events to the tracked activity operation ID', async () => {
+    let state = { activity: [] as Array<{ id: string; operation: string; status: 'running' | 'success' | 'failure' | 'cancelled'; message: string; startedAt: string; finishedAt?: string }> }
+    const events: ProgressEvent[] = []
+    const store = {
+      get: () => state,
+      save: async (next: typeof state) => { state = next },
+      getRecoveryMessage: () => undefined
+    }
+    const context = { store, emit: (event: ProgressEvent) => events.push(event) } as unknown as AppContext
+    await runTrackedMutation(context, 'Import local mod', async () => {
+      context.emit({ operationId: 'import', stage: 'staging', message: 'Unpacking archive.' })
+      return undefined
+    })
+    expect(events[0].operationId).toBe(state.activity[0].id)
+  })
+  })
 
 
 describe('GameBanana provider', () => {
@@ -134,8 +206,7 @@ describe('GameBanana provider', () => {
     try {
       const result = await new GameBananaProvider().browse({ query: 'hud', page: 1, perPage: 20 })
       expect(result.mods).toHaveLength(1)
-      expect(result.mods[0]).toMatchObject({ remoteModId: '11', title: 'CSS HUD', description: 'Readable & safe', tags: ['HUD'], previewImageUrl: 'https://images.gamebanana.com/img/ss/mods/530-90_preview.jpg' })
-      expect(result.categories).toEqual([{ value: 'HUD', count: 1 }])
+      expect(result.mods[0]).toMatchObject({ remoteModId: '11', title: 'CSS HUD', description: 'Readable & safe', tags: ['HUD'], category: 'HUD', previewImageUrl: 'https://images.gamebanana.com/img/ss/mods/530-90_preview.jpg' })
       expect(String(fetchMock.mock.calls[0][0])).toContain('_sSearchString=hud')
       expect(String(fetchMock.mock.calls[0][0])).toContain('_idGameRow=2')
     } finally {
@@ -344,7 +415,7 @@ describe('profile deployment', () => {
       const high = await makeMod(root, 'high-priority', 'high')
       const installation: GameInstallation = { gameId: 'counter-strike-source', steamRoot: root, installPath: join(root, 'game'), contentPath: gameContent, detectedAt: new Date().toISOString() }
       const profile: ModProfile = { id: 'profile-main', name: 'Main', gameId: 'counter-strike-source', entries: [{ modId: low.id, enabled: true, priority: 1 }, { modId: high.id, enabled: true, priority: 2 }], updatedAt: new Date().toISOString() }
-      const state: AppState = { schemaVersion: 1, settings: {}, game: installation, installedMods: [low, high], profiles: [profile], activity: [] }
+      const state: AppState = { schemaVersion: 1, settings: {}, game: installation, detectedGames: [installation], installedMods: [low, high], profiles: [profile], activity: [] }
       const deployment = new DeploymentService(join(root, 'state'), () => undefined)
       const preview = await deployment.preview(state, profile.id)
       expect(preview.conflicts).toHaveLength(1)
