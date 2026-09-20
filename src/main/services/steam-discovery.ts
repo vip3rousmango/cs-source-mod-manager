@@ -69,6 +69,12 @@ export class SteamDiscoveryService {
       return [join(programFiles, 'Steam'), join(programFilesX86, 'Steam')]
     }
     const home = homedir()
-    return [join(home, '.steam', 'steam'), join(home, '.local', 'share', 'Steam'), join(home, '.steam', 'root')]
+    return [
+      join(home, '.steam', 'steam'),
+      join(home, '.local', 'share', 'Steam'),
+      join(home, '.steam', 'root'),
+      join(home, '.var', 'app', 'com.valvesoftware.Steam', 'data', 'Steam'),
+      join(home, '.var', 'app', 'com.valvesoftware.Steam', '.local', 'share', 'Steam')
+    ]
   }
 }
