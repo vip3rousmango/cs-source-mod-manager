@@ -77,7 +77,8 @@ async function bootstrap(): Promise<void> {
   const catalog = new CatalogService(catalogPath)
   await catalog.load()
   const emit = (event: Parameters<NonNullable<Parameters<BrowserWindow['webContents']['send']>[1]>>[0]): void => {
-    mainWindow?.webContents.send('progress', event)
+    const operationId = appContext?.operationId
+    mainWindow?.webContents.send('progress', operationId ? Object.assign({}, event, { operationId }) : event)
   }
   const deployment = new DeploymentService(stateRoot, emit)
   const serverCache = new ServerCacheService()

@@ -5,8 +5,9 @@ import { join } from 'node:path'
 import type { AppState, GameInstallation, InstalledMod, ModProfile } from '../src/shared/contracts'
 import { assertSafeRelativePath, parseCatalog } from '../src/shared/validation'
 import { importArchive, importFolder } from '../src/main/services/archive-import'
-import { ServerCacheService } from '../src/main/services/server-cache'
+import { StateStore } from '../src/main/services/state-store'
 import { DeploymentService } from '../src/main/services/deployment'
+import { ServerCacheService } from '../src/main/services/server-cache'
 import { ProviderCacheService } from '../src/main/services/provider-cache'
 import { GameBananaProvider } from '../src/main/providers/gamebanana'
 import { fetchApprovedProviderDownload } from '../src/main/ipc'
@@ -46,6 +47,29 @@ describe('archive and catalog boundaries', () => {
       })
       expect(installed.id).toBe('verified-catalog-entry')
       expect(installed.contentPath).toBe(join(root, 'library', 'mods', 'verified-catalog-entry', '1', 'content'))
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('activity persistence', () => {
+  it('marks an interrupted operation as failed when state is reloaded', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'csmm-activity-'))
+    try {
+      const filePath = join(root, 'state.json')
+      const store = new StateStore(filePath)
+      await store.save({
+        schemaVersion: 1,
+        settings: {},
+        installedMods: [],
+        profiles: [],
+        activity: [{ id: 'operation-1', operation: 'Install community mod', status: 'running', message: 'Install community mod started.', startedAt: new Date(0).toISOString() }]
+      })
+      const reloaded = new StateStore(filePath)
+      const state = await reloaded.load()
+      expect(state.activity[0]).toMatchObject({ id: 'operation-1', status: 'failure', message: 'Operation was interrupted before completion.' })
+      expect(state.activity[0].finishedAt).toBeTruthy()
     } finally {
       await rm(root, { recursive: true, force: true })
     }

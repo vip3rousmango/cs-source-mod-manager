@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { DiscoverView } from './DiscoverView'
 import { LibraryView } from './LibraryView'
 import { ServerCacheView } from './ServerCacheView'
@@ -22,8 +22,6 @@ export default function App() {
   const [progress, setProgress] = useState<ProgressEvent[]>([])
   const [profileName, setProfileName] = useState('Default')
   const [selectedProfile, setSelectedProfile] = useState<string>()
-  const [downloadHistory, setDownloadHistory] = useState<ActivityRecord[]>([])
-  const activeOperationRef = useRef<string | undefined>(undefined)
   const [activeOperationId, setActiveOperationId] = useState<string>()
   const [preview, setPreview] = useState<DeploymentPreview>()
   const [serverCache, setServerCache] = useState<ServerCacheSnapshot>()
@@ -33,29 +31,25 @@ export default function App() {
     try { setSnapshot(await window.csmm.getSnapshot()); setError(undefined) } catch (operationError) { setError(errorMessage(operationError)) }
   }
 
-  function finishOperation(status: ActivityRecord['status'], message: string): void {
-    const operationId = activeOperationRef.current
-    if (!operationId && status === 'success') return
-    setDownloadHistory((current) => [...current.slice(-19), { id: operationId ?? `operation-${Date.now()}`, operation: 'Operation', status, message, startedAt: new Date().toISOString(), finishedAt: new Date().toISOString() }])
-    activeOperationRef.current = undefined
-    setActiveOperationId(undefined)
-  }
-
   async function run(operation: () => Promise<Snapshot>): Promise<void> {
-    activeOperationRef.current = undefined
-    setActiveOperationId(undefined)
     try {
-      const next = await operation()
+      const result = await operation()
+      const next = { ...await window.csmm.getSnapshot(), packInstall: result.packInstall }
       setSnapshot(next)
-      const message = next.packInstall?.failures.length ? `Pack installed ${next.packInstall.completed} item(s); ${next.packInstall.failures.length} failed.` : 'Download completed.'
+      setActiveOperationId(next.activity.find((item) => item.status === 'running')?.id)
+      const message = next.packInstall?.failures.length ? `Pack installed ${next.packInstall.completed} item(s); ${next.packInstall.failures.length} failed.` : 'Operation completed.'
       setError(next.packInstall?.failures.length ? message : undefined)
-      finishOperation(next.packInstall?.failures.length ? 'failure' : 'success', message)
     } catch (operationError) {
       const message = errorMessage(operationError)
       setError(message)
-      finishOperation('failure', message)
+      try {
+        const next = await window.csmm.getSnapshot()
+        setSnapshot(next)
+        setActiveOperationId(next.activity.find((item) => item.status === 'running')?.id)
+      } catch {}
     }
   }
+
   async function createModPack(name: string, entries: ModPackEntry[]): Promise<void> {
     try {
       setSnapshot(await window.csmm.createModPack(name, entries))
@@ -91,7 +85,6 @@ export default function App() {
   useEffect(() => {
     void refresh()
     return window.csmm.subscribeToProgress((event) => {
-      activeOperationRef.current = event.operationId
       setActiveOperationId(event.operationId)
       setProgress((current) => [...current.slice(-49), event])
     })
@@ -117,7 +110,7 @@ export default function App() {
     {view === 'news' && <NewsView onOpenExternal={openExternal} />}
     {view === 'library' && <LibraryView snapshot={snapshot} onImport={() => void run(() => window.csmm.importLocalMod())} onRemove={(modId) => void run(() => window.csmm.removeInstalledMod(modId))} onShare={shareInstalledMod} onInstallPack={(packId) => void run(() => window.csmm.installModPack(packId))} onInstallCatalog={(id) => void run(() => window.csmm.installCatalogMod(id))} />}
     {view === 'server-cache' && <ServerCacheView cache={serverCache} loading={serverCacheLoading} onRefresh={() => void refreshServerCache()} onClean={() => void cleanServerCache()} />}
-    {view === 'activity' && <section className="panel"><div className="section-heading"><div><h2>Activity</h2><p className="muted">Recent operation results and progress.</p></div><button className="secondary" onClick={() => void window.csmm.openManagedFolder()}>Open managed folder</button></div>{snapshot.activity.length === 0 && progress.length === 0 ? <p className="empty">No operations yet.</p> : <div className="list">{[...progress].reverse().map((item, index) => <div className="list-row" key={`${item.operationId}-${index}`}><div><strong>{item.stage}</strong><span>{item.message}</span></div></div>)}</div>}</section>}
-    </div><DownloadSidebar progress={progress} activity={[...snapshot.activity, ...downloadHistory]} activeOperationId={activeOperationId} onOpenActivity={() => setView('activity')} /></div>
+    {view === 'activity' && <section className="panel"><div className="section-heading"><div><h2>Activity</h2><p className="muted">Recent operation results and progress.</p></div><button className="secondary" onClick={() => void window.csmm.openManagedFolder()}>Open managed folder</button></div>{snapshot.activity.length === 0 && progress.length === 0 ? <p className="empty">No operations yet.</p> : <div className="list">{[...snapshot.activity].reverse().map((item) => <div className="list-row" key={item.id}><div><strong>{item.operation}</strong><span>{item.message}</span></div><span className="muted">{item.status}</span></div>)}</div>}</section>}
+    </div><DownloadSidebar progress={progress} activity={snapshot.activity} activeOperationId={activeOperationId} onOpenActivity={() => setView('activity')} /></div>
   </main>
 }
