@@ -43,8 +43,8 @@ async function bootstrap(): Promise<void> {
   await app.whenReady()
   const usingViteDevServer = typeof MAIN_WINDOW_VITE_DEV_SERVER_URL !== 'undefined' && Boolean(MAIN_WINDOW_VITE_DEV_SERVER_URL)
   const contentSecurityPolicy = usingViteDevServer
-    ? "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' ws: http://localhost:5173; img-src 'self' data:"
-    : "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:"
+    ? "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' ws: http://localhost:5173; img-src 'self' data: https://images.gamebanana.com"
+    : "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data: https://images.gamebanana.com"
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     callback({ responseHeaders: { ...details.responseHeaders, 'Content-Security-Policy': [contentSecurityPolicy] } })
   })

@@ -56,7 +56,7 @@ describe('GameBanana provider', () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       _aMetadata: { _nRecordCount: 2 },
       _aRecords: [
-        { _idRow: 11, _sName: 'CSS HUD', _sProfileUrl: 'https://gamebanana.com/mods/11', _sDescription: '<p>Readable &amp; safe</p>', _aGame: { _idRow: 2 }, _bHasFiles: true, _aTags: [{ _sName: 'HUD' }] },
+        { _idRow: 11, _sName: 'CSS HUD', _sProfileUrl: 'https://gamebanana.com/mods/11', _sDescription: '<p>Readable &amp; safe</p>', _aGame: { _idRow: 2 }, _bHasFiles: true, _aTags: [{ _sName: 'HUD' }], _aPreviewMedia: { _aImages: [{ _sBaseUrl: 'https://images.gamebanana.com/img/ss/mods', _sFile530: '530-90_preview.jpg' }] } },
         { _idRow: 12, _sName: 'Other Game', _aGame: { _idRow: 1 } }
       ]
     }), { status: 200, headers: { 'content-type': 'application/json' } }))
@@ -64,7 +64,7 @@ describe('GameBanana provider', () => {
     try {
       const result = await new GameBananaProvider().browse({ query: 'hud', page: 1, perPage: 20 })
       expect(result.mods).toHaveLength(1)
-      expect(result.mods[0]).toMatchObject({ remoteModId: '11', title: 'CSS HUD', description: 'Readable & safe', tags: ['HUD'] })
+      expect(result.mods[0]).toMatchObject({ remoteModId: '11', title: 'CSS HUD', description: 'Readable & safe', tags: ['HUD'], previewImageUrl: 'https://images.gamebanana.com/img/ss/mods/530-90_preview.jpg' })
       expect(String(fetchMock.mock.calls[0][0])).toContain('_sSearchString=hud')
       expect(String(fetchMock.mock.calls[0][0])).toContain('_idGameRow=2')
     } finally {

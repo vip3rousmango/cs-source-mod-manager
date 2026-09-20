@@ -42,7 +42,14 @@ function previewImage(value: unknown): string | undefined {
   const image = record(images[0])
   const base = stringValue(image._sBaseUrl)
   const file = stringValue(image._sFile530 ?? image._sFile220 ?? image._sFile)
-  return base && file ? `${base}/${file}` : undefined
+  if (!base || !file) return undefined
+  try {
+    const url = new URL(`${base}/${file}`)
+    if (url.protocol !== 'https:' || url.hostname !== 'images.gamebanana.com' || url.port || url.username || url.password || !url.pathname.startsWith('/img/ss/mods/')) return undefined
+    return url.href
+  } catch {
+    return undefined
+  }
 }
 
 function tags(value: unknown): string[] {
