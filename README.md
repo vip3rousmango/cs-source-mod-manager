@@ -28,6 +28,7 @@ Install and run checks:
 npm ci
 npm run typecheck
 npm test -- --run
+npm audit --audit-level=high
 npm run package
 ```
 
@@ -41,7 +42,7 @@ Use a disposable Counter-Strike: Source fixture directory while developing. Do n
 
 ## Release artifacts
 
-Forge remains available for local Electron packaging. Production distribution uses `electron-builder` because it provides the expected native formats without relying on a Forge AppImage maker:
+Electron Builder handles local packaging and production distribution from the same Vite build output:
 
 - Windows: NSIS installer and portable executable
 - Linux: AppImage and Debian package
@@ -59,6 +60,8 @@ Linux artifacts are currently unsigned; add an AppImage and Debian signing step 
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md). Please keep changes focused on the current game scope, preserve the manager-owned deployment boundary, and add behavior coverage for safety-sensitive filesystem changes.
+
+Issue templates, the pull request template, code ownership, dependency update automation, and the code of conduct are maintained under `.github/` and the repository root. Start with an issue for focused community work; security reports use the private advisory flow in [SECURITY.md](SECURITY.md).
 
 ## Security
 

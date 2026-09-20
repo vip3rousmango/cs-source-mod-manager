@@ -9,6 +9,7 @@ import { ServerCacheService } from '../src/main/services/server-cache'
 import { DeploymentService } from '../src/main/services/deployment'
 import { ProviderCacheService } from '../src/main/services/provider-cache'
 import { GameBananaProvider } from '../src/main/providers/gamebanana'
+import { fetchApprovedProviderDownload } from '../src/main/ipc'
 
 async function makeMod(root: string, name: string, value: string): Promise<InstalledMod> {
   const source = join(root, `${name}-source`)
@@ -165,14 +166,46 @@ describe('GameBanana provider', () => {
       _sProfileUrl: 'https://gamebanana.com/mods/11',
       _aLicenseChecklist: { yes: ['Download and install this Mod'] },
       _aGame: { _idRow: 2 },
-      _aFiles: [{ _idRow: 21, _sFile: 'hud.zip', _nFilesize: 12, _sAvResult: 'clean', _sAnalysisResult: 'ok', _sMd5Checksum: '0123456789abcdef0123456789abcdef', _sDownloadUrl: 'https://gamebanana.com/dl/21' }]
+      _aFiles: [{ _idRow: 21, _sFile: 'hud.zip', _nFilesize: 12, _sAvResult: 'clean', _sAnalysisResult: 'ok', _sMd5Checksum: '0123456789abcdef0123456789abcdef', _sDownloadUrl: 'https://files.gamebanana.com/dl/21' }]
     }
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify(details), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify(details), { status: 200 }))
     vi.stubGlobal('fetch', fetchMock)
     try {
-      await expect(new GameBananaProvider().resolveDownload('11', '21')).resolves.toMatchObject({ url: 'https://gamebanana.com/dl/21', checksumMd5: '0123456789abcdef0123456789abcdef' })
+      await expect(new GameBananaProvider().resolveDownload('11', '21')).resolves.toMatchObject({ url: 'https://files.gamebanana.com/dl/21', checksumMd5: '0123456789abcdef0123456789abcdef' })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+  it.each([
+    'https://evilgamebanana.com/download.zip',
+    'https://gamebanana.com.evil.example/download.zip',
+    'https://gamebanana.com:444/download.zip',
+    'https://user:pass@gamebanana.com/download.zip'
+  ])('rejects unsafe provider URL %s', async (downloadUrl) => {
+    const details = {
+      _idRow: 11,
+      _sName: 'CSS HUD',
+      _sProfileUrl: 'https://gamebanana.com/mods/11',
+      _aLicenseChecklist: { yes: ['Download and install this Mod'] },
+      _aGame: { _idRow: 2 },
+      _aFiles: [{ _idRow: 21, _sFile: 'hud.zip', _nFilesize: 12, _sAvResult: 'clean', _sAnalysisResult: 'ok', _sMd5Checksum: '0123456789abcdef0123456789abcdef', _sDownloadUrl: downloadUrl }]
+    }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify(details), { status: 200 })))
+    try {
+      await expect(new GameBananaProvider().resolveDownload('11', '21')).rejects.toMatchObject({ code: 'NETWORK_ERROR' })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('blocks an off-domain redirect before requesting the forbidden host', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 302, headers: { location: 'https://evil.example/download.zip' } }))
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      await expect(fetchApprovedProviderDownload('gamebanana', 'https://gamebanana.com/dl/21')).rejects.toMatchObject({ code: 'NETWORK_ERROR' })
+      expect(fetchMock).toHaveBeenCalledTimes(1)
     } finally {
       vi.unstubAllGlobals()
     }

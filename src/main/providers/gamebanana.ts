@@ -5,6 +5,19 @@ import type { ModProvider, ProviderDownload } from './mod-provider'
 const GAME_IDS: Record<SourceGameId, number> = { 'counter-strike-source': 2, 'half-life-2': 9, 'day-of-defeat-source': 10, 'brainbread-source': 500 }
 const GAME_ID = GAME_IDS['counter-strike-source']
 const API_ROOT = 'https://gamebanana.com/apiv11'
+const GAMEBANANA_HOST = /(^|\.)gamebanana\.com$/i
+
+function secureDownloadUrl(value: unknown): string | undefined {
+  const candidate = stringValue(value)
+  if (!candidate) return undefined
+  try {
+    const url = new URL(candidate)
+    if (url.protocol !== 'https:' || url.port || url.username || url.password || !GAMEBANANA_HOST.test(url.hostname)) return undefined
+    return url.href
+  } catch {
+    return undefined
+  }
+}
 
 interface RecordValue { [key: string]: unknown }
 
@@ -178,8 +191,8 @@ export class GameBananaProvider implements ModProvider {
     if (!selected.installable) throw new AppError('UNSUPPORTED_FORMAT', 'This GameBanana file is browse-only because it is not a clean, installable ZIP.')
     const payload = await fetchJson(`${API_ROOT}/Mod/${encodeURIComponent(remoteModId)}/ProfilePage`)
     const rawFile = (Array.isArray(payload._aFiles) ? payload._aFiles : []).map(record).find((candidate) => String(candidate._idRow) === remoteFileId)
-    const url = stringValue(rawFile?._sDownloadUrl)
-    if (!url?.startsWith('https://')) throw new AppError('NETWORK_ERROR', 'GameBanana did not provide a secure download URL.')
+    const url = secureDownloadUrl(rawFile?._sDownloadUrl)
+    if (!url) throw new AppError('NETWORK_ERROR', 'GameBanana did not provide a secure first-party download URL.')
     return { provider: 'gamebanana', remoteModId, remoteFileId, name: selected.name, url, sizeBytes: selected.sizeBytes, checksumMd5: selected.checksumMd5, sourceUrl: details.sourceUrl }
   }
 }

@@ -5,12 +5,33 @@ labels: [bug]
 body:
   - type: markdown
     attributes:
-      value: Include the app version, operating system, game installation source, and a minimal reproduction. Never attach private paths or proprietary mod files without removing sensitive information.
+      value: Use this form for one reproducible product problem. Do not report security vulnerabilities publicly; use the private security advisory link instead.
+  - type: input
+    id: summary
+    attributes:
+      label: Short summary
+      description: One sentence describing the user-visible failure.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Setup and game detection
+        - Discover and providers
+        - Collection and imports
+        - Profiles and deployment
+        - Server downloads
+        - Activity and packaging
+        - Other
+    validations:
+      required: true
   - type: input
     id: version
     attributes:
-      label: App version
-      placeholder: 0.1.0
+      label: App version or commit
+      placeholder: 0.1.0 or abc1234
     validations:
       required: true
   - type: dropdown
@@ -27,6 +48,7 @@ body:
     id: reproduction
     attributes:
       label: Reproduction steps
+      description: Include the smallest fixture, archive shape, or provider response that reproduces the issue.
     validations:
       required: true
   - type: textarea
@@ -41,3 +63,17 @@ body:
       label: Actual behavior
     validations:
       required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or screenshots
+      description: Remove usernames, absolute paths, tokens, and private mod content before posting.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Submission checks
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true

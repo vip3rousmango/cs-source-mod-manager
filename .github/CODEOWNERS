@@ -1,1 +1,11 @@
+# Default ownership for focused review.
 * @vip3rousmango
+
+# Security-sensitive paths require explicit maintainer review.
+/src/main/ @vip3rousmango
+/src/preload/ @vip3rousmango
+/src/shared/ @vip3rousmango
+/package.json @vip3rousmango
+/package-lock.json @vip3rousmango
+/.github/ @vip3rousmango
+/SECURITY.md @vip3rousmango

@@ -8,8 +8,10 @@ directories:
 files:
   - .vite/build/**/*
   - .vite/renderer/**/*
-  - catalog/**/*
   - package.json
+extraResources:
+  - from: catalog
+    to: catalog
 extraMetadata:
   main: .vite/build/index.js
 linux:

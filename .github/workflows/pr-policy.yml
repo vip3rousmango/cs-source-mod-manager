@@ -1,0 +1,38 @@
+name: Pull request policy
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  policy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate pull request title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          node <<'NODE'
+          const title = process.env.PR_TITLE ?? ''
+          const pattern = /^(feat|fix|security|docs|test|refactor|build|ci|chore|community)(\([^)]+\))?!?: .+/i
+          if (!pattern.test(title)) {
+            console.error('Use a focused title such as "feat(discover): add provider filters" or "fix(import): reject symlink entries".')
+            process.exit(1)
+          }
+          NODE
+      - name: Require scope and verification notes
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          node <<'NODE'
+          const body = process.env.PR_BODY ?? ''
+          const requiredSections = ['## Scope', '## Verification']
+          const missing = requiredSections.filter((section) => !body.includes(section))
+          if (body.trim().length < 80 || missing.length > 0) {
+            console.error(`Add a focused description with these sections: ${missing.join(', ') || 'none; include meaningful details'}.`)
+            process.exit(1)
+          }
+          NODE

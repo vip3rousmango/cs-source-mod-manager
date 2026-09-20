@@ -1,23 +1,59 @@
 name: Feature request
-description: Propose an improvement to the focused Source mod workflow
-title: "feature: "
+description: Propose one focused community feature or workflow improvement
+title: "feat: "
 labels: [enhancement]
 body:
+  - type: markdown
+    attributes:
+      value: Use this form for one focused improvement to discovery, curated releases, collections, profiles, imports, deployment safety, or related community workflows. Security issues belong in the private advisory flow.
   - type: textarea
     id: problem
     attributes:
       label: Problem to solve
-      description: What user workflow is currently difficult or unsafe?
+      description: Which user workflow is currently difficult, unclear, unsafe, or unavailable?
     validations:
       required: true
   - type: textarea
     id: proposal
     attributes:
       label: Proposed solution
+      description: Describe the smallest useful behavior, not an implementation wishlist.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Community area
+      options:
+        - Discover and provider browsing
+        - Curated releases and collection
+        - Profiles and deployment
+        - Local import and archive safety
+        - Activity and diagnostics
+        - Documentation and contributor experience
+        - Other focused community workflow
     validations:
       required: true
   - type: textarea
+    id: source
+    attributes:
+      label: Source or attribution requirements
+      description: If this involves external content, identify the documented public API/RSS terms, attribution, licensing, and permission path. Do not request arbitrary scraping.
+  - type: textarea
     id: scope
     attributes:
-      label: Game or Source-engine scope
-      description: Explain whether this is Counter-Strike: Source-specific or generalizable to another Source game.
+      label: Game and release scope
+      description: Explain whether this is Counter-Strike: Source-specific and what is intentionally out of scope.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Submission checks
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: This request is focused enough for one pull request.
+          required: true
+        - label: This is not a security vulnerability.
+          required: true

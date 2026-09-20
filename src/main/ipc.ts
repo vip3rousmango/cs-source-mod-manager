@@ -2,7 +2,7 @@ import { BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron'
 import { createWriteStream } from 'node:fs'
 import { mkdir, readFile, rename, rm, stat } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
-import { join } from 'node:path'
+import { join, resolve, sep as pathSeparator } from 'node:path'
 import { SOURCE_GAMES, type AppState, type ModPackEntry, type ModProfile, type ModProviderId, type ProgressEvent, type ProviderBrowseRequest, type ProviderModDetails, type ProviderSearchResult, type Snapshot, type SourceGameId } from '../shared/contracts'
 import { parseProfile } from '../shared/validation'
 import { AppError, toAppError } from './services/errors'
@@ -30,7 +30,14 @@ interface AppContext {
 
 
 function ensureSender(event: Electron.IpcMainInvokeEvent, context: AppContext): void {
-  if (event.sender !== context.window.webContents) throw new AppError('INVALID_REQUEST', 'Invalid IPC sender.')
+  if (event.sender !== context.window.webContents || event.senderFrame !== context.window.webContents.mainFrame) throw new AppError('INVALID_REQUEST', 'Invalid IPC sender.')
+  const frameUrl = event.senderFrame.url
+  let localFrame = frameUrl.startsWith('file://')
+  try {
+    const parsed = new URL(frameUrl)
+    localFrame ||= parsed.protocol === 'http:' && (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1')
+  } catch {}
+  if (!localFrame) throw new AppError('INVALID_REQUEST', 'Invalid IPC frame origin.')
 }
 
 function snapshot(context: AppContext): Snapshot {
@@ -137,6 +144,38 @@ function getProvider(context: AppContext, providerId: ModProviderId): ModProvide
   if (!provider) throw new AppError('NOT_FOUND', `Mod provider ${providerId} is not available.`)
   return provider
 }
+
+const GAMEBANANA_DOWNLOAD_HOST = /(^|\.)gamebanana\.com$/i
+
+function approvedGameBananaDownloadUrl(value: string): boolean {
+  try {
+    const url = new URL(value)
+    return url.protocol === 'https:' && !url.port && !url.username && !url.password && GAMEBANANA_DOWNLOAD_HOST.test(url.hostname)
+  } catch {
+    return false
+  }
+}
+
+export async function fetchApprovedProviderDownload(providerId: ModProviderId, url: string): Promise<Response> {
+  let currentUrl = url
+  for (let redirectCount = 0; redirectCount <= 5; redirectCount += 1) {
+    if (providerId === 'gamebanana' && !approvedGameBananaDownloadUrl(currentUrl)) throw new AppError('NETWORK_ERROR', 'Provider redirected the download outside its approved domain.')
+    const response = await fetch(currentUrl, { redirect: 'manual' })
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get('location')
+      if (!location) throw new AppError('NETWORK_ERROR', 'Provider returned an invalid download redirect.')
+      try {
+        currentUrl = new URL(location, currentUrl).href
+      } catch {
+        throw new AppError('NETWORK_ERROR', 'Provider returned an invalid download redirect.')
+      }
+      continue
+    }
+    if (providerId === 'gamebanana' && !approvedGameBananaDownloadUrl(response.url || currentUrl)) throw new AppError('NETWORK_ERROR', 'Provider redirected the download outside its approved domain.')
+    return response
+  }
+  throw new AppError('NETWORK_ERROR', 'Provider returned too many download redirects.')
+}
 function parseBrowseRequest(value: unknown): ProviderBrowseRequest {
   if (!value || typeof value !== 'object') throw new AppError('INVALID_REQUEST', 'Invalid provider browse request.')
   const request = value as Partial<ProviderBrowseRequest>
@@ -166,9 +205,8 @@ async function downloadProviderArchive(context: AppContext, providerId: ModProvi
   const downloads = join(context.libraryRoot, 'downloads')
   await mkdir(downloads, { recursive: true })
   const archivePath = join(downloads, `${providerId}-${remoteModId}-${remoteFileId}.zip`)
-  const response = await fetch(download.url)
+  const response = await fetchApprovedProviderDownload(providerId, download.url)
   if (!response.ok || !response.body) throw new AppError('NETWORK_ERROR', `Download failed with HTTP ${response.status}.`)
-  if (!response.url.startsWith('https://')) throw new AppError('NETWORK_ERROR', 'Download redirected to an insecure URL.')
   const temporaryPath = `${archivePath}.partial`
   const output = createWriteStream(temporaryPath, { flags: 'w' })
   const hash = createHash('sha256')
@@ -364,8 +402,12 @@ export function registerIpc(context: AppContext): void {
   ipcMain.handle('openManagedFolder', guard(async (current) => {
     const game = current.store.get().game
     if (!game) throw new AppError('GAME_NOT_FOUND', 'Configure Counter-Strike: Source first.')
-    const target = current.store.get().activeDeployment?.targetPath ?? join(game.contentPath, 'custom')
-    await shell.openPath(target)
+    if (game.contentPath.includes('\0')) throw new AppError('INVALID_REQUEST', 'The configured game path is invalid.')
+    const managedRoot = resolve(game.contentPath, 'custom')
+    const target = resolve(current.store.get().activeDeployment?.targetPath ?? managedRoot)
+    if (target.includes('\0') || (target !== managedRoot && !target.startsWith(`${managedRoot}${pathSeparator}`))) throw new AppError('INVALID_REQUEST', 'The managed folder path is outside the game custom directory.')
+    const error = await shell.openPath(target)
+    if (error) throw new AppError('PERMISSION_DENIED', `Could not open the managed folder: ${error}`)
   }))
 }
 
