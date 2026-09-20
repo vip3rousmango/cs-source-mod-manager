@@ -28,7 +28,14 @@ export default function App() {
   const [serverCacheLoading, setServerCacheLoading] = useState(false)
 
   async function refresh(): Promise<void> {
-    try { setSnapshot(await window.csmm.getSnapshot()); setError(undefined) } catch (operationError) { setError(errorMessage(operationError)) }
+    try {
+      const next = await window.csmm.getSnapshot()
+      setSnapshot(next)
+      setActiveOperationId(next.activity.find((item) => item.status === 'running')?.id)
+      setError(undefined)
+    } catch (operationError) {
+      setError(errorMessage(operationError))
+    }
   }
 
   async function run(operation: () => Promise<Snapshot>): Promise<void> {
@@ -52,7 +59,10 @@ export default function App() {
 
   async function createModPack(name: string, entries: ModPackEntry[]): Promise<void> {
     try {
-      setSnapshot(await window.csmm.createModPack(name, entries))
+      const result = await window.csmm.createModPack(name, entries)
+      const next = { ...await window.csmm.getSnapshot(), packInstall: result.packInstall }
+      setSnapshot(next)
+      setActiveOperationId(next.activity.find((item) => item.status === 'running')?.id)
       setError(undefined)
     } catch (operationError) {
       setError(errorMessage(operationError))
@@ -71,7 +81,14 @@ export default function App() {
   }
 
   async function cleanServerCache(): Promise<void> {
-    try { setServerCache(await window.csmm.cleanServerCache(true)); setError(undefined) } catch (operationError) { setError(errorMessage(operationError)) } finally { setServerCacheLoading(false) }
+    try {
+      setServerCache(await window.csmm.cleanServerCache(true))
+      await refresh()
+    } catch (operationError) {
+      setError(errorMessage(operationError))
+    } finally {
+      setServerCacheLoading(false)
+    }
   }
 
   async function shareInstalledMod(modId: string): Promise<void> {
