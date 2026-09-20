@@ -94,13 +94,13 @@ function normalizeEntries(entries: SafeEntry[], contentRoot: CatalogEntry['conte
   if (meaningful.some((entry) => basename(entry.path).toLowerCase() === 'gameinfo.txt')) {
     throw new AppError('INVALID_CONTENT', 'This archive is a complete Source mod; import Counter-Strike: Source custom content instead.')
   }
-  const topRoots = new Set(meaningful.map((entry) => entry.path.split('/')[0].toLowerCase()))
-  let strip = ''
-  if (contentRoot === 'single-directory' || (contentRoot === 'auto' && topRoots.size === 1 && ![...topRoots].some((root) => CONTENT_ROOTS.has(root)))) {
-    strip = [...topRoots][0] ?? ''
-  }
-  const normalized = meaningful.map((entry) => ({ ...entry, path: strip && entry.path.startsWith(`${strip}/`) ? entry.path.slice(strip.length + 1) : entry.path }))
-  if (!normalized.some((entry) => CONTENT_ROOTS.has(entry.path.split('/')[0].toLowerCase()))) {
+  const normalized = meaningful.flatMap((entry) => {
+    const segments = entry.path.split('/')
+    if (contentRoot === 'archive-root') return CONTENT_ROOTS.has(segments[0].toLowerCase()) ? [entry] : []
+    const rootIndex = segments.findIndex((segment) => CONTENT_ROOTS.has(segment.toLowerCase()))
+    return rootIndex < 0 ? [] : [{ ...entry, path: segments.slice(rootIndex).join('/') }]
+  })
+  if (normalized.length === 0) {
     throw new AppError('INVALID_CONTENT', 'No recognized Counter-Strike: Source content folders were found.')
   }
   const seen = new Set<string>()

@@ -34,15 +34,18 @@ test('opens the consolidated collection and utility surfaces', async () => {
     const page = await application.firstWindow()
     await expect(page.getByRole('heading', { name: 'Profiles' })).toBeVisible()
     await expect(page.getByRole('heading', { name: 'Game coverage & setup' })).toBeVisible()
+    await page.getByRole('button', { name: 'Full screen' }).click()
+    await expect(page.getByRole('button', { name: 'Exit full screen' })).toBeVisible()
+    await page.getByRole('button', { name: 'Exit full screen' }).click()
     await page.getByRole('button', { name: 'collection' }).click()
     await expect(page.getByRole('heading', { name: 'My library' })).toBeVisible()
     await expect(page.getByRole('heading', { name: 'Curated releases' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Add to library' }).first()).toBeVisible()
     await page.getByRole('button', { name: 'discover' }).click()
     await expect(page.getByRole('heading', { name: 'Find your next loadout.' })).toBeVisible()
-    await expect(page.getByText('Your library starts here.')).toBeVisible()
-    await expect(page.getByRole('combobox', { name: 'Mod source' }).getByRole('option', { name: 'Bundled catalog' })).toHaveCount(1)
-    await page.getByRole('combobox', { name: 'Mod source' }).selectOption('catalog')
+    await expect(page.getByText('Your collection starts here.')).toBeVisible()
+    await expect(page.getByRole('combobox', { name: 'Source' }).getByRole('option', { name: 'Bundled catalog' })).toHaveCount(1)
+    await page.getByRole('combobox', { name: 'Source' }).selectOption('catalog')
     await expect(page.getByRole('heading', { name: 'My library' })).toBeVisible()
     await page.getByRole('button', { name: 'news' }).click()
     await expect(page.getByRole('heading', { name: 'What is happening in Source?' })).toBeVisible()
@@ -121,6 +124,27 @@ test('browses and opens a live GameBanana result through the Electron bridge', a
     await firstResult.click()
     await expect(page.locator('.provider-details').getByRole('heading').first()).toBeVisible({ timeout: 30_000 })
     await expect(page.locator('.provider-details').getByRole('heading', { name: 'Files' })).toBeVisible()
+  } finally {
+    await closeApplication(application)
+    await rm(userData, { recursive: true, force: true })
+  }
+})
+test('opens a live community news article in the in-app reader', async () => {
+  test.skip(process.env.CSMM_LIVE_NEWS_SMOKE !== '1', 'Set CSMM_LIVE_NEWS_SMOKE=1 to run the external-news smoke test.')
+  const userData = await mkdtemp(join(tmpdir(), 'csmm-news-e2e-'))
+  const application = await electron.launch({
+    executablePath: electronExecutable(),
+    args: [`--user-data-dir=${userData}`, join(process.cwd(), '.vite/build/index.js')],
+    env: { ...process.env, CSMM_TEST_USER_DATA: userData }
+  })
+  try {
+    const page = await application.firstWindow()
+    await page.getByRole('button', { name: 'news' }).click()
+    const readButton = page.getByRole('button', { name: 'Read inside app' }).first()
+    await expect(readButton).toBeVisible({ timeout: 30_000 })
+    await readButton.click()
+    await expect(page.getByRole('dialog', { name: 'Community article' })).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByRole('button', { name: 'Back to news' })).toBeVisible()
   } finally {
     await closeApplication(application)
     await rm(userData, { recursive: true, force: true })

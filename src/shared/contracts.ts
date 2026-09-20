@@ -120,6 +120,11 @@ export interface ProviderModSummary {
   hasFiles: boolean
 }
 
+export interface ProviderCategory {
+  value: string
+  count: number
+}
+
 export interface ProviderSearchResult {
   provider: ModProviderId
   query: string
@@ -127,6 +132,7 @@ export interface ProviderSearchResult {
   perPage: number
   total: number
   hasMore: boolean
+  categories: ProviderCategory[]
   mods: ProviderModSummary[]
 }
 
@@ -185,6 +191,15 @@ export interface CommunityNewsItem {
   sourceLabel: string
   title: string
   summary: string
+  url: string
+  publishedAt?: string
+}
+export interface CommunityNewsArticle {
+  id: string
+  feedId: CommunityFeedId
+  sourceLabel: string
+  title: string
+  body: string
   url: string
   publishedAt?: string
 }
@@ -286,6 +301,7 @@ export interface OperationResult<T = undefined> {
 
 export interface IPCAPI {
   getSnapshot(): Promise<Snapshot>
+  toggleFullscreen(): Promise<boolean>
   discoverGame(): Promise<Snapshot>
   chooseGameDirectory(): Promise<Snapshot>
   refreshCatalog(): Promise<Snapshot>
@@ -306,6 +322,7 @@ export interface IPCAPI {
   getServerCache(): Promise<ServerCacheSnapshot>
   cleanServerCache(confirm: boolean): Promise<ServerCacheSnapshot>
   getCommunityNews(forceRefresh?: boolean): Promise<CommunityNewsSnapshot>
+  getCommunityNewsArticle(id: string): Promise<CommunityNewsArticle>
   openExternal(url: string): Promise<void>
   subscribeToProgress(listener: (event: ProgressEvent) => void): () => void
 }

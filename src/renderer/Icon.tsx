@@ -1,4 +1,4 @@
-export type IconName = 'compass' | 'library' | 'layers' | 'download' | 'activity' | 'news' | 'refresh' | 'external' | 'package' | 'spark'
+export type IconName = 'compass' | 'library' | 'layers' | 'download' | 'activity' | 'news' | 'refresh' | 'external' | 'package' | 'spark' | 'chevron'
 
 const paths: Record<IconName, string> = {
   compass: 'M12 2 4.5 19.5 12 16l7.5 3.5L12 2Zm0 5.1 2.1 6.8-2.1 1-2.1-1L12 7.1Z',
@@ -10,7 +10,8 @@ const paths: Record<IconName, string> = {
   refresh: 'M20 11a8 8 0 0 0-14.8-4L3 9m0-5v5h5m-1 4a8 8 0 0 0 14.8 4L21 15m0 5v-5h-5',
   external: 'M14 4h6v6m-1-5-8 8M17 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h5',
   package: 'm12 3 8 4.5v9L12 21l-8-4.5v-9L12 3Zm-8 4.5 8 4.5 8-4.5M12 12v9M8 5.2l8 4.5',
-  spark: 'm12 2 1.6 6.4L20 10l-6.4 1.6L12 18l-1.6-6.4L4 10l6.4-1.6L12 2Zm7 14 .7 2.3L22 19l-2.3.7L19 22l-.7-2.3L16 19l2.3-.7L19 16Z'
+  spark: 'm12 2 1.6 6.4L20 10l-6.4 1.6L12 18l-1.6-6.4L4 10l6.4-1.6L12 2Zm7 14 .7 2.3L22 19l-2.3.7L19 22l-.7-2.3L16 19l2.3-.7L19 16Z',
+  chevron: 'm9 5 7 7-7 7',
 }
 
 export function Icon({ name, size = 18 }: { name: IconName; size?: number }) {

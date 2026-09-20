@@ -1,4 +1,4 @@
-import type { CommunityFeedId, CommunityFeedSource, CommunityFeedState, CommunityNewsItem, CommunityNewsSnapshot } from '../../shared/contracts'
+import type { CommunityFeedId, CommunityFeedSource, CommunityFeedState, CommunityNewsArticle, CommunityNewsItem, CommunityNewsSnapshot } from '../../shared/contracts'
 
 interface FeedDefinition extends CommunityFeedSource {
   allowedHosts: string[]
@@ -73,6 +73,29 @@ async function readFeedText(response: Response): Promise<string> {
   chunks.push(decoder.decode())
   return chunks.join('')
 }
+const MAX_ARTICLE_BYTES = 2_000_000
+
+function articleText(html: string): string {
+  const article = html.match(/<article\b[^>]*>([\s\S]*?)<\/article>/i)?.[1] ?? html
+  const withoutNoise = article.replace(/<(script|style|noscript|nav|footer|form)\b[^>]*>[\s\S]*?<\/\1>/gi, '')
+  const withBreaks = withoutNoise.replace(/<\/(p|div|section|article|h[1-6]|li|br)>/gi, '\n\n')
+  const text = decodeXml(withBreaks.replace(/<[^>]+>/g, ' ')).replace(/\n[ \t]+/g, '\n').replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim()
+  return text.slice(0, 20_000)
+}
+
+async function readArticleText(response: Response): Promise<string> {
+  if (!response.body) throw new Error('Article response had no body.')
+  const decoder = new TextDecoder()
+  const chunks: string[] = []
+  let byteCount = 0
+  for await (const chunk of response.body as AsyncIterable<Uint8Array>) {
+    byteCount += chunk.byteLength
+    if (byteCount > MAX_ARTICLE_BYTES) throw new Error('Article response exceeded the safety limit.')
+    chunks.push(decoder.decode(chunk, { stream: true }))
+  }
+  chunks.push(decoder.decode())
+  return chunks.join('')
+}
 
 function isFeedDocument(xml: string): boolean {
   return /^\s*(?:<\?xml[\s\S]*?\?>\s*)?(?:<!--[\s\S]*?-->\s*)*<(?:rss|feed|rdf:RDF)\b/i.test(xml)
@@ -126,5 +149,34 @@ export class CommunityNewsService {
     const snapshot: CommunityNewsSnapshot = { refreshedAt: new Date().toISOString(), items, feeds: results.map(({ items: _items, ...feed }) => feed) }
     this.cached = { expiresAt: Date.now() + CACHE_MS, snapshot }
     return snapshot
+  }
+  async getArticle(id: string): Promise<CommunityNewsArticle> {
+    const snapshot = await this.getSnapshot()
+    const item = snapshot.items.find((candidate) => candidate.id === id)
+    if (!item) throw new Error('News item was not found. Refresh the community desk and try again.')
+    const feed = FEEDS.find((candidate) => candidate.id === item.feedId)
+    if (!feed || !validFeedUrl(feed, item.url)) throw new Error('This article is not available from an approved community source.')
+    let currentUrl = item.url
+    for (let redirects = 0; redirects <= 3; redirects += 1) {
+      if (!validFeedUrl(feed, currentUrl)) throw new Error('Article redirect left the approved source host.')
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 10_000)
+      try {
+        const response = await fetch(currentUrl, { redirect: 'manual', signal: controller.signal, headers: { accept: 'text/html, application/xhtml+xml' } })
+        if (response.status >= 300 && response.status < 400) {
+          const location = response.headers.get('location')
+          await response.body?.cancel().catch(() => undefined)
+          if (!location) throw new Error('Article returned an invalid redirect.')
+          currentUrl = new URL(location, currentUrl).href
+          continue
+        }
+        if (!response.ok) throw new Error(`Article returned HTTP ${response.status}.`)
+        const body = articleText(await readArticleText(response))
+        return { ...item, body: body || item.summary }
+      } finally {
+        clearTimeout(timeout)
+      }
+    }
+    throw new Error('Article returned too many redirects.')
   }
 }

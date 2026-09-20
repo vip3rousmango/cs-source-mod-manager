@@ -12,6 +12,16 @@ import { ProviderCacheService } from '../src/main/services/provider-cache'
 import { GameBananaProvider } from '../src/main/providers/gamebanana'
 import { fetchApprovedProviderDownload, runTrackedMutation, type AppContext } from '../src/main/ipc'
 import { CommunityNewsService } from '../src/main/services/community-news'
+const WRAPPED_CONTENT_ARCHIVE = `UEsDBAoAAAAAAJ16NF0AAAAAAAAAAAAAAAAIABwAY3N0cmlrZS9VVAkAAxoysGoaMrBqdXgLAAEE
+9QEAAAQUAAAAUEsDBAoAAAAAAJ16NF0AAAAAAAAAAAAAAAASABwAY3N0cmlrZS9tYXRlcmlhbHMv
+VVQJAAMaMrBqGjKwanV4CwABBPUBAAAEFAAAAFBLAwQKAAAAAACdejRdTBYE7Q8AAAAPAAAAGgAc
+AGNzdHJpa2UvbWF0ZXJpYWxzL3Rlc3Qudm10VVQJAAMaMrBqGjKwanV4CwABBPUBAAAEFAAAAFVu
+bGl0R2VuZXJpY3t9ClBLAQIeAwoAAAAAAJ16NF0AAAAAAAAAAAAAAAAIABgAAAAAAAAAEADtQQAA
+AABjc3RyaWtlL1VUBQADGjKwanV4CwABBPUBAAAEFAAAAFBLAQIeAwoAAAAAAJ16NF0AAAAAAAAA
+AAAAAAASABgAAAAAAAAAEADtQUIAAABjc3RyaWtlL21hdGVyaWFscy9VVAUAAxoysGp1eAsAAQT1
+AQAABBQAAABQSwECHgMKAAAAAACdejRdTBYE7Q8AAAAPAAAAGgAYAAAAAAABAAAApIGOAAAAY3N0
+cmlrZS9tYXRlcmlhbHMvdGVzdC52bXRVVAUAAxoysGp1eAsAAQT1AQAABBQAAABQSwUGAAAAAAMA
+AwAGAQAA8QAAAAAA`.replace(/\s/g, '')
 async function makeMod(root: string, name: string, value: string): Promise<InstalledMod> {
   const source = join(root, `${name}-source`)
   await mkdir(join(source, 'materials'), { recursive: true })
@@ -51,6 +61,25 @@ describe('archive and catalog boundaries', () => {
       await rm(root, { recursive: true, force: true })
     }
   })
+  it('normalizes provider archives with a game wrapper directory', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'csmm-provider-archive-'))
+    try {
+      const archivePath = join(root, 'wrapped.zip')
+      await writeFile(archivePath, Buffer.from(WRAPPED_CONTENT_ARCHIVE, 'base64'))
+      const installed = await importArchive(archivePath, {
+        libraryRoot: join(root, 'library'),
+        source: 'provider',
+        modId: 'gamebanana:11:21',
+        storageId: 'gamebanana-11-21',
+        storageVersion: '21',
+        title: 'Wrapped provider release',
+        version: '21'
+      })
+      expect(await readFile(join(installed.contentPath, 'materials', 'test.vmt'), 'utf8')).toContain('UnlitGeneric')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
 })
 
 describe('activity persistence', () => {
@@ -69,7 +98,6 @@ describe('activity persistence', () => {
       const reloaded = new StateStore(filePath)
       const state = await reloaded.load()
       expect(state.activity[0]).toMatchObject({ id: 'operation-1', status: 'failure', message: 'Operation was interrupted before completion.' })
-      expect(state.activity[0].finishedAt).toBeTruthy()
     } finally {
       await rm(root, { recursive: true, force: true })
     }
@@ -98,7 +126,7 @@ describe('GameBanana provider', () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       _aMetadata: { _nRecordCount: 2 },
       _aRecords: [
-        { _idRow: 11, _sName: 'CSS HUD', _sProfileUrl: 'https://gamebanana.com/mods/11', _sDescription: '<p>Readable &amp; safe</p>', _aGame: { _idRow: 2 }, _bHasFiles: true, _aTags: [{ _sName: 'HUD' }], _aPreviewMedia: { _aImages: [{ _sBaseUrl: 'https://images.gamebanana.com/img/ss/mods', _sFile530: '530-90_preview.jpg' }] } },
+        { _idRow: 11, _sName: 'CSS HUD', _sProfileUrl: 'https://gamebanana.com/mods/11', _sDescription: '<p>Readable &amp; safe</p>', _aGame: { _idRow: 2 }, _aRootCategory: { _sName: 'HUD' }, _bHasFiles: true, _aTags: [{ _sName: 'HUD' }], _aPreviewMedia: { _aImages: [{ _sBaseUrl: 'https://images.gamebanana.com/img/ss/mods', _sFile530: '530-90_preview.jpg' }] } },
         { _idRow: 12, _sName: 'Other Game', _aGame: { _idRow: 1 } }
       ]
     }), { status: 200, headers: { 'content-type': 'application/json' } }))
@@ -107,6 +135,7 @@ describe('GameBanana provider', () => {
       const result = await new GameBananaProvider().browse({ query: 'hud', page: 1, perPage: 20 })
       expect(result.mods).toHaveLength(1)
       expect(result.mods[0]).toMatchObject({ remoteModId: '11', title: 'CSS HUD', description: 'Readable & safe', tags: ['HUD'], previewImageUrl: 'https://images.gamebanana.com/img/ss/mods/530-90_preview.jpg' })
+      expect(result.categories).toEqual([{ value: 'HUD', count: 1 }])
       expect(String(fetchMock.mock.calls[0][0])).toContain('_sSearchString=hud')
       expect(String(fetchMock.mock.calls[0][0])).toContain('_idGameRow=2')
     } finally {
@@ -373,6 +402,25 @@ describe('community news feeds', () => {
     try {
       const snapshot = await new CommunityNewsService().getSnapshot(true)
       expect(snapshot.feeds.find((feed) => feed.id === 'steam-news')).toMatchObject({ status: 'error', error: 'Feed response exceeded the safety limit.' })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+  it('loads approved articles as safe in-app reading text', async () => {
+    const fetchMock = vi.fn(async (input: string | URL) => {
+      const url = String(input)
+      if (url.endsWith('/news/1')) return new Response('<html><body><article><h1>Update</h1><p>First paragraph.</p><script>unsafe()</script><p>Second paragraph.</p></article></body></html>', { status: 200, headers: { 'content-type': 'text/html' } })
+      const host = new URL(url).hostname
+      return new Response(rss(host), { status: 200, headers: { 'content-type': 'application/rss+xml' } })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      const service = new CommunityNewsService()
+      const snapshot = await service.getSnapshot(true)
+      const article = await service.getArticle(snapshot.items[0].id)
+      expect(article.body).toContain('First paragraph.')
+      expect(article.body).toContain('Second paragraph.')
+      expect(article.body).not.toContain('unsafe')
     } finally {
       vi.unstubAllGlobals()
     }

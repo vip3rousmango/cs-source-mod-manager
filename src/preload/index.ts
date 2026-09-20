@@ -3,6 +3,7 @@ import type { IPCAPI, ModPackEntry, ModProfile, ProgressEvent, ProviderBrowseReq
 
 const api: IPCAPI = {
   getSnapshot: () => ipcRenderer.invoke('getSnapshot'),
+  toggleFullscreen: () => ipcRenderer.invoke('toggleFullscreen'),
   discoverGame: () => ipcRenderer.invoke('discoverGame'),
   chooseGameDirectory: () => ipcRenderer.invoke('chooseGameDirectory'),
   refreshCatalog: () => ipcRenderer.invoke('refreshCatalog'),
@@ -23,6 +24,7 @@ const api: IPCAPI = {
   getServerCache: () => ipcRenderer.invoke('getServerCache'),
   cleanServerCache: (confirm) => ipcRenderer.invoke('cleanServerCache', confirm),
   getCommunityNews: (forceRefresh = false) => ipcRenderer.invoke('getCommunityNews', forceRefresh),
+  getCommunityNewsArticle: (id: string) => ipcRenderer.invoke('getCommunityNewsArticle', id),
   openExternal: (url) => ipcRenderer.invoke('openExternal', url),
   subscribeToProgress: (listener: (event: ProgressEvent) => void) => {
     const wrapped = (_event: Electron.IpcRendererEvent, value: ProgressEvent): void => listener(value)

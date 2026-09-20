@@ -315,6 +315,11 @@ export function registerIpc(context: AppContext): void {
     try { ensureSender(event, context); return await handler(context, value) } catch (error) { const appError = toAppError(error); const serialized = new Error(appError.message); serialized.name = appError.name; Object.assign(serialized, appError.toShape()); throw serialized }
   }
   ipcMain.handle('getSnapshot', guard((_context) => snapshot(context)))
+  ipcMain.handle('toggleFullscreen', guard((current) => {
+    const next = !current.window.isFullScreen()
+    current.window.setFullScreen(next)
+    return next
+  }))
   ipcMain.handle('discoverGame', guard((current) => enqueueTrackedMutation(current, 'Discover game', async () => {
     assertWritable(current)
     const candidates = await current.steam.discover()
@@ -376,6 +381,10 @@ export function registerIpc(context: AppContext): void {
     return snapshot(current)
   })))
   ipcMain.handle('getCommunityNews', guard((current, forceRefresh: unknown) => current.communityNews.getSnapshot(forceRefresh === true)))
+  ipcMain.handle('getCommunityNewsArticle', guard((current, value: unknown) => {
+    if (typeof value !== 'string' || value.length < 1 || value.length > 1000) throw new AppError('INVALID_REQUEST', 'Invalid news item ID.')
+    return current.communityNews.getArticle(value)
+  }))
   ipcMain.handle('openExternal', guard((_current, value: unknown) => shell.openExternal(parsePublicExternalUrl(value))))
   ipcMain.handle('installModPack', guard((current, value: string) => enqueueTrackedMutation(current, 'Install mod pack', async () => {
     assertWritable(current)

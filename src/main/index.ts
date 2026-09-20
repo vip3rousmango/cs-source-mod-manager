@@ -25,10 +25,10 @@ let appContext: AppContext | undefined
 
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    minWidth: 900,
-    minHeight: 600,
+    width: 1440,
+    height: 900,
+    minWidth: 1080,
+    minHeight: 700,
     webPreferences: { preload: join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true, allowRunningInsecureContent: false }
   })
   mainWindow = window

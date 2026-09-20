@@ -26,6 +26,7 @@ export default function App() {
   const [preview, setPreview] = useState<DeploymentPreview>()
   const [serverCache, setServerCache] = useState<ServerCacheSnapshot>()
   const [serverCacheLoading, setServerCacheLoading] = useState(false)
+  const [fullscreen, setFullscreen] = useState(false)
 
   async function refresh(): Promise<void> {
     try {
@@ -37,8 +38,11 @@ export default function App() {
       setError(errorMessage(operationError))
     }
   }
+  async function toggleFullscreen(): Promise<void> {
+    try { setFullscreen(await window.csmm.toggleFullscreen()) } catch (operationError) { setError(errorMessage(operationError)) }
+  }
 
-  async function run(operation: () => Promise<Snapshot>): Promise<void> {
+  async function run(operation: () => Promise<Snapshot>): Promise<boolean> {
     try {
       const result = await operation()
       const next = { ...await window.csmm.getSnapshot(), packInstall: result.packInstall }
@@ -46,6 +50,7 @@ export default function App() {
       setActiveOperationId(next.activity.find((item) => item.status === 'running')?.id)
       const message = next.packInstall?.failures.length ? `Pack installed ${next.packInstall.completed} item(s); ${next.packInstall.failures.length} failed.` : 'Operation completed.'
       setError(next.packInstall?.failures.length ? message : undefined)
+      return true
     } catch (operationError) {
       const message = errorMessage(operationError)
       setError(message)
@@ -54,6 +59,7 @@ export default function App() {
         setSnapshot(next)
         setActiveOperationId(next.activity.find((item) => item.status === 'running')?.id)
       } catch {}
+      return false
     }
   }
 
@@ -116,14 +122,14 @@ export default function App() {
   if (!snapshot) return <main className="shell"><h1>CS Source Mod Manager</h1><p>Loading application state…</p></main>
 
   return <main className="shell">
-    <header className="topbar"><div><p className="eyebrow">Steam utility</p><h1>CS Source Mod Manager</h1></div><button className="secondary" onClick={() => void refresh()}>Refresh</button></header>
+    <header className="topbar"><div><p className="eyebrow">Steam utility</p><h1>CS Source Mod Manager</h1></div><div className="topbar-actions"><button className="secondary" onClick={() => void toggleFullscreen()}>{fullscreen ? 'Exit full screen' : 'Full screen'}</button><button className="secondary" onClick={() => void refresh()}>Refresh</button></div></header>
     <nav className="tabs"><div className="primary-tabs">{(['discover', 'library', 'profiles'] as View[]).map((item) => <button data-view={item} key={item} className={view === item ? 'tab active' : 'tab'} onClick={() => setView(item)}><Icon name={item === 'discover' ? 'compass' : item === 'library' ? 'library' : 'layers'} size={15} /> {item === 'library' ? 'collection' : item}</button>)}<button data-view="news" className={view === 'news' ? 'tab active' : 'tab'} onClick={() => setView('news')}><Icon name="news" size={15} /> news</button></div><div className="utility-tabs"><button data-view="server-cache" className={view === 'server-cache' ? 'tab active' : 'tab'} onClick={() => setView('server-cache')}><Icon name="download" size={15} /> server downloads</button><button data-view="activity" className={view === 'activity' ? 'tab active' : 'tab'} onClick={() => setView('activity')}><Icon name="activity" size={15} /> activity</button></div></nav>
     {error && <div className="alert error"><strong>Operation failed</strong><span>{error}</span></div>}
     {snapshot.recoveryRequired && <div className="alert error"><strong>Recovery required</strong><span>{snapshot.recoveryRequired}</span></div>}
     <div className="workspace-layout"><div className="workspace-main">
     {view === 'profiles' && <section className="panel setup-inline"><div className="section-heading"><div><p className="eyebrow">Workspace</p><h3>Game coverage & setup</h3><p className="muted">Set up the installation once. Available Source games stay visible in Discover, while Profiles remains the place to deploy safely.</p></div><span className={snapshot.game ? 'status-pill' : 'catalog-count'}>{snapshot.game ? 'Connected' : 'Needs setup'}</span></div><div className="coverage-grid">{SOURCE_GAMES.map((game) => <article className={`coverage-card${game.installable ? ' available' : ''}`} key={game.id}><span className="coverage-icon" aria-hidden="true">{game.label.slice(0, 2).toUpperCase()}</span><strong>{game.label}</strong><span>{game.installable ? 'Install + browse' : 'Browse only'}</span></article>)}</div><div className="setup-game-grid"><div><strong>Counter-Strike: Source installation</strong><span className="muted">{snapshot.game ? snapshot.game.installPath : 'Detect Steam or choose a validated directory.'}</span></div><button onClick={() => void run(() => window.csmm.discoverGame())}>Detect Steam</button><button className="secondary" onClick={() => void run(() => window.csmm.chooseGameDirectory())}>Choose directory</button></div></section>}
+    {view === 'discover' && <DiscoverView snapshot={snapshot} onInstall={(provider, remoteModId, remoteFileId) => void run(() => window.csmm.installProviderMod(provider, remoteModId, remoteFileId)).then((success) => { if (success) setView('library') })} onCreatePack={createModPack} onOpenCatalog={() => setView('library')} />}
     {view === 'profiles' && <section className="panel"><div className="section-heading"><div><h2>Profiles</h2><p className="muted">Priority is explicit; higher values win conflicts.</p></div><div className="inline-form"><input value={profileName} onChange={(event) => setProfileName(event.target.value)} aria-label="New profile name" /><button onClick={() => void run(() => window.csmm.createProfile(profileName))}>Create</button></div></div>{snapshot.profiles.length === 0 ? <p className="empty">Create a profile to compose installed mods.</p> : <><label className="field">Profile<select value={currentProfile?.id ?? ''} onChange={(event) => { setSelectedProfile(event.target.value); setPreview(undefined) }}>{snapshot.profiles.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label>{currentProfile && <><div className="list">{snapshot.installedMods.length === 0 ? <p className="empty">Import a mod before composing this profile.</p> : snapshot.installedMods.map((mod) => { const entry = currentProfile.entries.find((candidate) => candidate.modId === mod.id); const enabled = entry?.enabled ?? false; return <div className="list-row" key={mod.id}><label className="check"><input type="checkbox" checked={enabled} onChange={(event) => { const entries = currentProfile.entries.filter((candidate) => candidate.modId !== mod.id); entries.push({ modId: mod.id, enabled: event.target.checked, priority: entry?.priority ?? 0 }); void updateProfile(currentProfile, entries) }} /><span><strong>{mod.title}</strong><small>{mod.source} · {mod.version}</small></span></label><input className="priority" type="number" value={entry?.priority ?? 0} aria-label={`${mod.title} priority`} onChange={(event) => { const entries = currentProfile.entries.filter((candidate) => candidate.modId !== mod.id); entries.push({ modId: mod.id, enabled, priority: Number(event.target.value) || 0 }); void updateProfile(currentProfile, entries) }} /></div> })}</div><div className="actions"><button onClick={async () => { try { setPreview(await window.csmm.previewProfile(currentProfile.id)); setError(undefined) } catch (operationError) { setError(errorMessage(operationError)) } }}>Preview deployment</button><button onClick={() => void run(() => window.csmm.deployProfile(currentProfile.id, Boolean(preview?.conflicts.length)))}>{preview?.conflicts.length ? 'Confirm & deploy conflicts' : 'Deploy profile'}</button></div>{preview && <div className={preview.conflicts.length ? 'alert warning' : 'success'}><strong>{preview.conflicts.length ? 'Conflicts require review' : 'No conflicts'}</strong><span>{preview.fileCount} files · {preview.conflicts.length} conflicts</span>{preview.conflicts.map((conflict) => <span key={conflict.relativePath}>{conflict.relativePath}: {conflict.winnerModId} wins</span>)}</div>}</>}</>}</section>}
-    {view === 'discover' && <DiscoverView snapshot={snapshot} onInstall={(provider, remoteModId, remoteFileId) => void run(() => window.csmm.installProviderMod(provider, remoteModId, remoteFileId))} onCreatePack={createModPack} onOpenCatalog={() => setView('library')} />}
     {view === 'news' && <NewsView onOpenExternal={openExternal} />}
     {view === 'library' && <LibraryView snapshot={snapshot} onImport={() => void run(() => window.csmm.importLocalMod())} onRemove={(modId) => void run(() => window.csmm.removeInstalledMod(modId))} onShare={shareInstalledMod} onInstallPack={(packId) => void run(() => window.csmm.installModPack(packId))} onInstallCatalog={(id) => void run(() => window.csmm.installCatalogMod(id))} />}
     {view === 'server-cache' && <ServerCacheView cache={serverCache} loading={serverCacheLoading} onRefresh={() => void refreshServerCache()} onClean={() => void cleanServerCache()} />}

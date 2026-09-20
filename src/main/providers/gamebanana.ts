@@ -157,8 +157,17 @@ export class GameBananaProvider implements ModProvider {
     const payload = await fetchJson(`${API_ROOT}/${query ? 'Util/Search/Results' : 'Mod/Index'}?${params.toString()}`)
     const { metadata, records } = browsePayload(payload)
     const mods = records.map((item) => summary(item, gameId)).filter((item): item is ProviderModSummary => Boolean(item))
+    const categoryMap = new Map<string, { value: string; count: number }>()
+    for (const mod of mods) {
+      const value = mod.category?.trim()
+      if (!value) continue
+      const key = value.toLocaleLowerCase()
+      const category = categoryMap.get(key)
+      if (category) category.count += 1
+      else categoryMap.set(key, { value, count: 1 })
+    }
     const total = metadata._nRecordCount as number
-    return { provider: 'gamebanana', query: request.query, page, perPage, total, hasMore: metadata._bIsComplete !== true && page * perPage < total, mods }
+    return { provider: 'gamebanana', query: request.query, page, perPage, total, hasMore: metadata._bIsComplete !== true && page * perPage < total, categories: [...categoryMap.values()].sort((left, right) => left.value.localeCompare(right.value)), mods }
   }
 
   async getDetails(remoteModId: string, gameId: SourceGameId = 'counter-strike-source'): Promise<ProviderModDetails> {
