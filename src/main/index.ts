@@ -23,14 +23,20 @@ async function createWindow(): Promise<void> {
   mainWindow = window
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   window.webContents.on('will-navigate', (event, url) => { if (!url.startsWith('http://localhost:5173')) event.preventDefault() })
+  window.webContents.on('console-message', (details) => {
+    if (details.level === 'error') console.error(`[renderer] ${details.message} (${details.sourceId}:${details.lineNumber})`)
+  })
   if (typeof MAIN_WINDOW_VITE_DEV_SERVER_URL !== 'undefined' && MAIN_WINDOW_VITE_DEV_SERVER_URL) await window.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL)
   else await window.loadFile(join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`))
 }
 
 async function bootstrap(): Promise<void> {
   await app.whenReady()
+  const contentSecurityPolicy = app.isPackaged
+    ? "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:"
+    : "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' ws: http://localhost:5173; img-src 'self' data:"
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
-    callback({ responseHeaders: { ...details.responseHeaders, 'Content-Security-Policy': ["default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:"] } })
+    callback({ responseHeaders: { ...details.responseHeaders, 'Content-Security-Policy': [contentSecurityPolicy] } })
   })
   const stateRoot = join(app.getPath('userData'), 'state')
   const libraryRoot = join(stateRoot, 'library')
@@ -53,4 +59,7 @@ async function bootstrap(): Promise<void> {
 }
 
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit() })
-void bootstrap()
+void bootstrap().catch((error) => {
+  console.error('Fatal application startup error:', error)
+  app.exit(1)
+})
