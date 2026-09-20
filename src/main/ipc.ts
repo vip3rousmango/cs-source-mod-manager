@@ -65,7 +65,8 @@ function enqueueMutation<T>(operation: () => Promise<T>): Promise<T> {
   mutationTail = result.then(() => undefined, () => undefined)
   return result
 }
-async function runTrackedMutation<T>(context: AppContext, operation: string, callback: () => Promise<T>): Promise<T> {
+export async function runTrackedMutation<T>(context: AppContext, operation: string, callback: () => Promise<T>): Promise<T> {
+  assertWritable(context)
   const id = `${operation}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
   const startedAt = new Date().toISOString()
   const state = context.store.get()

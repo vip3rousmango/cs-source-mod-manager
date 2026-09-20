@@ -10,7 +10,7 @@ import { DeploymentService } from '../src/main/services/deployment'
 import { ServerCacheService } from '../src/main/services/server-cache'
 import { ProviderCacheService } from '../src/main/services/provider-cache'
 import { GameBananaProvider } from '../src/main/providers/gamebanana'
-import { fetchApprovedProviderDownload } from '../src/main/ipc'
+import { fetchApprovedProviderDownload, runTrackedMutation, type AppContext } from '../src/main/ipc'
 import { CommunityNewsService } from '../src/main/services/community-news'
 async function makeMod(root: string, name: string, value: string): Promise<InstalledMod> {
   const source = join(root, `${name}-source`)
@@ -70,6 +70,22 @@ describe('activity persistence', () => {
       const state = await reloaded.load()
       expect(state.activity[0]).toMatchObject({ id: 'operation-1', status: 'failure', message: 'Operation was interrupted before completion.' })
       expect(state.activity[0].finishedAt).toBeTruthy()
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+  it('does not overwrite preserved recovery state when a mutation is attempted', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'csmm-recovery-'))
+    try {
+      const filePath = join(root, 'state.json')
+      const original = JSON.stringify({ schemaVersion: 99, sentinel: 'preserve-me' })
+      await writeFile(filePath, original)
+      const store = new StateStore(filePath)
+      await store.load()
+      const callback = vi.fn(async () => 'should not run')
+      await expect(runTrackedMutation({ store } as AppContext, 'Unsafe mutation', callback)).rejects.toMatchObject({ code: 'RECOVERY_REQUIRED' })
+      expect(callback).not.toHaveBeenCalled()
+      expect(await readFile(filePath, 'utf8')).toBe(original)
     } finally {
       await rm(root, { recursive: true, force: true })
     }
