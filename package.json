@@ -1,0 +1,61 @@
+{
+  "name": "counter-strike-source-mod-manager",
+  "productName": "Counter-Strike Source Mod Manager",
+  "desktopName": "cs-source-mod-manager",
+  "version": "0.1.0",
+  "description": "An open-source profile-based mod manager for Counter-Strike: Source.",
+  "main": ".vite/build/index.js",
+  "author": {
+    "name": "vip3rousmango",
+    "email": "vip3rousmango@users.noreply.github.com"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/vip3rousmango/cs-source-mod-manager",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vip3rousmango/cs-source-mod-manager.git"
+  },
+  "bugs": {
+    "url": "https://github.com/vip3rousmango/cs-source-mod-manager/issues"
+  },
+  "scripts": {
+    "start": "electron-forge start",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest",
+    "test:e2e": "npm run package && playwright test",
+    "package": "electron-forge package",
+    "make": "electron-forge make",
+    "release": "electron-builder --publish never",
+    "release:windows": "electron-builder --publish never --win nsis portable",
+    "release:linux": "electron-builder --publish never --linux AppImage deb",
+    "release:macos": "electron-builder --publish never --mac dmg zip"
+  },
+  "dependencies": {
+    "electron-squirrel-startup": "^1.0.1",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "yauzl": "^3.2.0",
+    "zod": "^4.1.5"
+  },
+  "devDependencies": {
+    "@electron-forge/cli": "^7.8.3",
+    "@electron-forge/maker-deb": "^7.8.3",
+    "@electron-forge/maker-squirrel": "^7.8.3",
+    "@electron-forge/maker-zip": "^7.8.3",
+    "@electron-forge/plugin-vite": "^7.8.3",
+    "@playwright/test": "^1.55.0",
+    "@types/node": "^24.3.0",
+    "@types/react": "^19.1.12",
+    "@types/react-dom": "^19.1.9",
+    "@types/yauzl": "^2.10.3",
+    "@vitejs/plugin-react": "^5.0.2",
+    "electron": "^37.10.3",
+    "electron-builder": "^26.0.12",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.4",
+    "vitest": "^3.2.4"
+  },
+  "allowScripts": {
+    "electron@37.10.3": true
+  }
+}

@@ -1,0 +1,10 @@
+node_modules
+out
+.vite
+dist
+release
+coverage
+test-results
+*.log
+.DS_Store
+.env

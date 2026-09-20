@@ -1,0 +1,23 @@
+name: Feature request
+description: Propose an improvement to the focused Source mod workflow
+title: "feature: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: What user workflow is currently difficult or unsafe?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Game or Source-engine scope
+      description: Explain whether this is Counter-Strike: Source-specific or generalizable to another Source game.
