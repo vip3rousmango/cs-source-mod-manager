@@ -1,4 +1,5 @@
-import { _electron as electron, expect, test, type ElectronApplication } from '@playwright/test'
+import { _electron as electron, expect, test } from '@playwright/test'
+import type { ElectronApplication } from 'playwright'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -21,7 +22,7 @@ async function closeApplication(application: ElectronApplication): Promise<void>
   if (child.exitCode === null) child.kill('SIGKILL')
 }
 
-test('launches the built Electron main process and browses a populated curated catalog', async () => {
+test('opens the consolidated collection and utility surfaces', async () => {
   const fixtureManifest = join(process.cwd(), 'test/fixtures/catalog/catalog/manifest.json')
   const userData = await mkdtemp(join(tmpdir(), 'csmm-e2e-'))
   const application = await electron.launch({
@@ -31,25 +32,19 @@ test('launches the built Electron main process and browses a populated curated c
   })
   try {
     const page = await application.firstWindow()
-    await expect(page.getByRole('heading', { name: 'Game setup' })).toBeVisible()
-    await page.getByRole('button', { name: 'catalog' }).click()
-    await expect(page.getByRole('heading', { name: 'Mod catalog' })).toBeVisible()
-    await expect(page.getByRole('button', { name: /CSMM Demo Content Pack/ })).toBeVisible()
-    await expect(page.getByRole('complementary').getByRole('heading', { name: 'CSMM Demo Content Pack' })).toBeVisible()
-    await expect(page.getByText('Download & install')).toBeVisible()
-    await page.getByRole('textbox', { name: 'Search mods' }).fill('sounds')
-    await expect(page.getByRole('button', { name: /CSMM Second Content Pack/ })).toBeVisible()
-    await expect(page.getByRole('complementary').getByRole('heading', { name: 'CSMM Second Content Pack' })).toBeVisible()
-    await page.getByRole('textbox', { name: 'Search mods' }).fill('does-not-exist')
-    await expect(page.getByText('No mods match this search.')).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Profiles' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Game coverage & setup' })).toBeVisible()
+    await page.getByRole('button', { name: 'collection' }).click()
+    await expect(page.getByRole('heading', { name: 'My library' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Curated releases' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Add to library' }).first()).toBeVisible()
     await page.getByRole('button', { name: 'discover' }).click()
     await expect(page.getByRole('heading', { name: 'Find your next loadout.' })).toBeVisible()
     await expect(page.getByText('Your library starts here.')).toBeVisible()
     await expect(page.getByRole('combobox', { name: 'Mod source' }).getByRole('option', { name: 'Bundled catalog' })).toHaveCount(1)
     await page.getByRole('combobox', { name: 'Mod source' }).selectOption('catalog')
-    await expect(page.getByRole('heading', { name: 'Mod catalog' })).toBeVisible()
-    await page.getByRole('button', { name: 'library' }).click()
     await expect(page.getByRole('heading', { name: 'My library' })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Curated releases' })).toBeVisible()
     await page.getByRole('button', { name: 'server downloads' }).click()
     await expect(page.getByRole('heading', { name: 'Downloads from servers' })).toBeVisible()
     await expect(page.getByText('Connect a game installation first.')).toBeVisible()
@@ -77,6 +72,9 @@ test('renders provider cards and falls back when a preview image fails', async (
     await expect(preview).toBeVisible()
     await preview.evaluate((image) => image.dispatchEvent(new Event('error')))
     await expect(firstResult.locator('.provider-art span')).toBeVisible()
+    const providerGrid = page.locator('.provider-grid')
+    await expect(providerGrid).toBeVisible()
+    await expect(providerGrid).toHaveCSS('display', 'grid')
     await firstResult.click()
     const details = page.locator('.provider-details')
     await expect(details.getByRole('heading', { name: 'Files' })).toBeVisible()
@@ -84,7 +82,7 @@ test('renders provider cards and falls back when a preview image fails', async (
     await addToPackButtons.nth(0).click()
     await addToPackButtons.nth(1).click()
     await page.getByRole('button', { name: 'Save pack' }).click()
-    await page.getByRole('button', { name: 'library' }).click()
+    await page.getByRole('button', { name: 'collection' }).click()
     await expect(page.getByRole('heading', { name: 'Mod packs' })).toBeVisible()
     await page.getByRole('button', { name: 'Install full pack' }).click()
     await expect(page.getByText('Pack installed 0 item(s); 2 failed.')).toBeVisible()

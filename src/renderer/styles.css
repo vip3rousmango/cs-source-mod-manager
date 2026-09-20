@@ -86,7 +86,6 @@ code { color: #a7c0ff; }
 .discover-empty { display: grid; gap: 10px; }
 .discover-layout { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(300px, .8fr); gap: 16px; align-items: start; }
 .result-heading { display: flex; justify-content: space-between; margin-bottom: 10px; }
-.provider-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
 .provider-card { display: block; padding: 0; overflow: hidden; text-align: left; background: #1a202c; border: 1px solid #333d50; }
 .provider-card:hover, .provider-card.selected { border-color: #6d8fff; filter: none; }
 .provider-art { display: grid; place-items: center; height: 82px; background: linear-gradient(135deg, #3b2d6e, #1b2945); color: #d0c5ff; font-size: 30px; font-weight: 850; }
@@ -134,9 +133,42 @@ code { color: #a7c0ff; }
 .featured-copy { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; padding: 28px; }
 .featured-copy h3 { margin: 4px 0 8px; font-size: 30px; letter-spacing: -.04em; }
 .featured-copy p:not(.eyebrow) { max-width: 620px; color: #bac4d8; line-height: 1.5; }
-.mod-rail-section { display: grid; gap: 12px; }
-.provider-rail { display: flex; gap: 12px; overflow-x: auto; padding: 2px 2px 13px; scroll-snap-type: x proximity; scrollbar-color: #4e5e8b transparent; }
-.provider-rail .provider-card { flex: 0 0 238px; scroll-snap-align: start; }
+.mod-grid-section { display: grid; gap: 12px; }
+.provider-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; align-items: stretch; }
+.pagination-bar { display: flex; align-items: center; justify-content: center; gap: 14px; padding-top: 6px; }
+.pagination-bar span { color: #98a6c2; font-size: 12px; font-weight: 750; }
+.primary-tabs, .utility-tabs { display: flex; gap: 6px; }
+.utility-tabs { margin-inline-start: auto; }
+.collection-guide, .curated-collection, .setup-inline { display: grid; gap: 16px; }
+.collection-paths { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.collection-paths article { display: grid; gap: 6px; padding: 14px; border: 1px solid #35415c; border-radius: 10px; background: #181f2e; }
+.collection-paths span { color: #9aa8c0; font-size: 12px; line-height: 1.45; }
+.collection-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.curated-card { overflow: hidden; border: 1px solid #354057; border-radius: 12px; background: #191f2c; }
+.curated-art { display: flex; align-items: flex-end; justify-content: space-between; height: 88px; padding: 14px; background: linear-gradient(135deg, #4c659d, #242e4e); }
+.curated-art span { color: #edf0ff; font-size: 42px; font-weight: 900; }
+.curated-art small { color: #d4dcff; font-size: 10px; font-weight: 800; letter-spacing: .12em; }
+.curated-card-body { display: grid; gap: 10px; padding: 14px; }
+.curated-card-body p { min-height: 54px; margin: 0; color: #b5bfd2; line-height: 1.4; }
+.curated-card-body button { width: 100%; }
+.setup-game-grid { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: center; }
+.setup-game-grid > div { display: grid; gap: 5px; }
+.discover-recommendation { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-color: #4f5e91; background: linear-gradient(100deg, #202947, #1a2030); }
+.discover-recommendation > div { display: grid; gap: 5px; }
+.coverage-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
+.coverage-card { display: grid; gap: 6px; padding: 14px; border: 1px solid #354057; border-radius: 10px; background: #181e2a; }
+.coverage-card > span:last-child { color: #8997b2; font-size: 11px; }
+.coverage-card.available { border-color: #536fae; background: linear-gradient(145deg, #202e4b, #181e2b); }
+.coverage-icon { display: grid; place-items: center; width: 34px; height: 34px; border-radius: 9px; color: #dce4ff; background: #3a4d8d; font-size: 11px; font-weight: 900; }
+.category-lanes { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.category-lane { display: grid; gap: 3px; padding: 11px 12px; text-align: left; border: 1px solid #303d5a; border-radius: 10px; color: #c1cbe1; background: #171e2c; }
+.category-lane strong { font-size: 20px; }
+.category-lane small { color: #8492ad; font-size: 10px; }
+.category-lane.active, .category-lane:hover { border-color: #7088ef; background: #26345b; filter: none; }
+.community-pulse { display: grid; gap: 14px; }
+.pulse-list { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.pulse-list article { display: grid; gap: 4px; padding: 11px; border-inline-start: 2px solid #5268bb; background: #181f2e; }
+.pulse-list span { color: #8997b0; font-size: 11px; line-height: 1.35; }
 .provider-art { display: grid; place-items: center; align-content: center; gap: 6px; height: 132px; }
 .provider-art span { position: relative; z-index: 1; font-size: 46px; font-weight: 900; letter-spacing: -.1em; }
 .source-control select { min-width: 128px; color: #cbd5f4; background: #1b2231; border-color: #3d4b6d; }
@@ -202,6 +234,10 @@ code { color: #a7c0ff; }
 .cache-path code { overflow: hidden; color: #9eaff2; text-overflow: ellipsis; white-space: nowrap; }
 .server-cache-list { display: grid; gap: 7px; max-height: 430px; overflow: auto; }
 .server-cache-row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 14px; border: 1px solid #30394d; border-radius: 8px; background: #181e29; }
+@media (max-width: 800px) {
+  .collection-paths, .setup-game-grid { grid-template-columns: 1fr; }
+  .utility-tabs { margin-inline-start: 0; }
+}
 .server-cache-row div { min-width: 0; }
 .server-cache-row strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .server-cache-row span { display: block; margin-top: 4px; color: #8794ac; font-size: 11px; }
@@ -220,4 +256,7 @@ code { color: #a7c0ff; }
   .library-stats div { text-align: left; }
   .cache-summary { grid-template-columns: 1fr 1fr; }
   .cache-path { grid-column: 1 / -1; }
+  .category-lanes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .discover-recommendation { align-items: flex-start; flex-direction: column; }
+  .pulse-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

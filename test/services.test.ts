@@ -193,6 +193,18 @@ describe('provider response cache', () => {
       await rm(root, { recursive: true, force: true })
     }
   })
+  it('supports concurrent writes to the same key without temp-file collisions', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'csmm-provider-cache-concurrent-'))
+    try {
+      const cache = new ProviderCacheService(root, 60_000)
+      await Promise.all(Array.from({ length: 20 }, (_, index) => cache.set('browse:same-key', { index })))
+      const value = await cache.get<{ index: number }>('browse:same-key')
+      expect(value?.index).toBeGreaterThanOrEqual(0)
+      expect(value?.index).toBeLessThan(20)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
 })
 describe('server download cache', () => {
   it('scans and cleans only the game download directory', async () => {

@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
@@ -35,7 +35,7 @@ export class ProviderCacheService {
     this.memory.set(key, envelope)
     await mkdir(this.rootPath, { recursive: true })
     const filePath = this.filePath(key)
-    const temporaryPath = `${filePath}.${process.pid}.${Date.now()}.tmp`
+    const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`
     await writeFile(temporaryPath, JSON.stringify(envelope), { encoding: 'utf8', mode: 0o600 })
     await rename(temporaryPath, filePath)
   }

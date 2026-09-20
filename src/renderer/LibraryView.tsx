@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import type { InstalledMod, ModPack, Snapshot } from '../shared/contracts'
+import type { CatalogEntry, InstalledMod, ModPack, Snapshot } from '../shared/contracts'
 
 interface LibraryViewProps {
   snapshot: Snapshot
@@ -7,9 +7,10 @@ interface LibraryViewProps {
   onRemove: (modId: string) => void
   onShare: (modId: string) => Promise<void>
   onInstallPack: (packId: string) => void
+  onInstallCatalog: (id: string) => void
 }
 
-export function LibraryView({ snapshot, onImport, onRemove, onShare, onInstallPack }: LibraryViewProps) {
+export function LibraryView({ snapshot, onImport, onRemove, onShare, onInstallPack, onInstallCatalog }: LibraryViewProps) {
   const [query, setQuery] = useState('')
   const [source, setSource] = useState<'all' | InstalledMod['source']>('all')
   const [sharedId, setSharedId] = useState<string>()
@@ -22,6 +23,7 @@ export function LibraryView({ snapshot, onImport, onRemove, onShare, onInstallPa
     })
   }, [query, source, snapshot.installedMods])
   const packs = snapshot.modPacks ?? []
+  const installedCatalogIds = useMemo(() => new Set(snapshot.installedMods.filter((mod) => mod.source === 'catalog').map((mod) => mod.id)), [snapshot.installedMods])
 
   async function share(modId: string): Promise<void> {
     await onShare(modId)
@@ -34,10 +36,19 @@ export function LibraryView({ snapshot, onImport, onRemove, onShare, onInstallPa
       <div><p className="eyebrow">Your collection</p><h2>My library</h2><p className="muted">Every mod is normalized, reversible, and ready for a profile.</p></div>
       <div className="library-stats"><div><strong>{snapshot.installedMods.length}</strong><span>installed</span></div><div><strong>{snapshot.profiles.length}</strong><span>profiles</span></div></div>
     </div>
+    <section className="collection-guide panel"><div className="section-heading"><div><p className="eyebrow">One collection, three doors</p><h3>Discover, curate, install</h3><p className="muted">Discover finds community releases. Curated downloads are verified archives. Library is where both become managed content for Profiles.</p></div><span className="catalog-count">{snapshot.installedMods.length} ready</span></div><div className="collection-paths"><article><strong>Discover</strong><span>Latest GameBanana skins, maps, HUDs, and sounds.</span></article><article><strong>Curated</strong><span>Repository-owned archives with checksum verification.</span></article><article><strong>Profiles</strong><span>Compose enabled mods and deploy them safely to Source.</span></article></div></section>
+    <section className="curated-collection panel"><div className="section-heading"><div><p className="eyebrow">Verified archive shelf</p><h3>Curated releases</h3><p className="muted">A quieter starting point when you want known-good content instead of a community search.</p></div><span className="catalog-count">{snapshot.catalog.entries.length} available</span></div>{snapshot.catalog.entries.length === 0 ? <p className="empty">No curated archives are bundled in this build. Use Discover or import a local ZIP.</p> : <div className="collection-grid">{snapshot.catalog.entries.map((entry) => <CuratedCard key={entry.id} entry={entry} installed={installedCatalogIds.has(entry.id)} onInstall={() => onInstallCatalog(entry.id)} />)}</div>}</section>
     {packs.length > 0 && <section className="pack-library panel"><div className="section-heading"><div><p className="eyebrow">Saved loadouts</p><h3>Mod packs</h3><p className="muted">Install a full collection without repeating the download flow.</p></div><span className="catalog-count">{packs.length} saved</span></div><div className="pack-grid">{packs.map((pack) => <PackCard key={pack.id} pack={pack} onInstall={() => onInstallPack(pack.id)} />)}</div></section>}
     <div className="library-toolbar"><label className="search-field"><span className="sr-only">Search installed mods</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search your library…" /></label><label className="tag-field"><span className="sr-only">Filter library source</span><select value={source} onChange={(event) => setSource(event.target.value as typeof source)}><option value="all">All sources</option><option value="provider">Community providers</option><option value="catalog">Curated</option><option value="local-folder">Imported folders</option><option value="local-zip">Imported ZIPs</option></select></label><button onClick={onImport}>Import mod</button></div>
     {filtered.length === 0 ? <div className="empty library-empty"><strong>{snapshot.installedMods.length === 0 ? 'Your library is ready for its first mod.' : 'Nothing matches this filter.'}</strong><span>{snapshot.installedMods.length === 0 ? 'Import a folder or ZIP, or discover a community mod to start building your collection.' : 'Try another title or source.'}</span>{snapshot.installedMods.length === 0 && <button onClick={onImport}>Import a mod</button>}</div> : <div className="library-grid">{filtered.map((mod) => <LibraryCard key={mod.id} mod={mod} shared={sharedId === mod.id} onRemove={onRemove} onShare={() => void share(mod.id)} />)}</div>}
   </section>
+}
+function CuratedCard({ entry, installed, onInstall }: { entry: CatalogEntry; installed: boolean; onInstall: () => void }) {
+  return <article className="curated-card"><div className="curated-art" aria-hidden="true"><span>{entry.title.slice(0, 1).toUpperCase()}</span><small>{entry.tags[0] ?? 'SOURCE'}</small></div><div className="curated-card-body"><div className="card-title-row"><h3>{entry.title}</h3>{installed && <span className="badge">Installed</span>}</div><p>{entry.description}</p><span className="muted">v{entry.version} · {formatBytes(entry.archiveSizeBytes)}</span><button disabled={installed} onClick={onInstall}>{installed ? 'In library' : 'Add to library'}</button></div></article>
+}
+function formatBytes(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`
 }
 function PackCard({ pack, onInstall }: { pack: ModPack; onInstall: () => void }) {
   return <article className="pack-card"><div><p className="eyebrow">Saved pack</p><h3>{pack.name}</h3><span className="muted">{pack.entries.length} provider file{pack.entries.length === 1 ? '' : 's'}</span></div><div className="pack-entries">{pack.entries.slice(0, 4).map((entry) => <span key={`${entry.remoteModId}:${entry.remoteFileId}`}>{entry.title}</span>)}</div><button onClick={onInstall}>Install full pack</button></article>
