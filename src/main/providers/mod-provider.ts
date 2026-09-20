@@ -7,6 +7,7 @@ export interface ProviderDownload {
   name: string
   url: string
   sizeBytes: number
+  checksumMd5?: string
   sourceUrl: string
 }
 

@@ -7,7 +7,7 @@ export const CatalogManifestSchema = z.object({
   entries: z.array(z.object({
     id: z.string().regex(/^[a-z0-9][a-z0-9-]{1,63}$/),
     title: z.string().min(1),
-    version: z.string().min(1),
+    version: z.string().regex(/^[A-Za-z0-9._-]{1,80}$/),
     author: z.string().optional(),
     description: z.string().min(1),
     tags: z.array(z.string()),

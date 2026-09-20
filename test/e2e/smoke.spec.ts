@@ -38,3 +38,27 @@ test('launches the built Electron main process and browses a populated curated c
     await rm(userData, { recursive: true, force: true })
   }
 })
+
+test('browses and opens a live GameBanana result through the Electron bridge', async () => {
+  test.skip(process.env.CSMM_LIVE_PROVIDER_SMOKE !== '1', 'Set CSMM_LIVE_PROVIDER_SMOKE=1 to run the external-provider smoke test.')
+  const userData = await mkdtemp(join(tmpdir(), 'csmm-provider-e2e-'))
+  const application = await electron.launch({
+    executablePath: electronExecutable(),
+    args: [`--user-data-dir=${userData}`, join(process.cwd(), '.vite/build/index.js')],
+    env: { ...process.env, CSMM_TEST_USER_DATA: userData }
+  })
+  try {
+    const page = await application.firstWindow()
+    await page.getByRole('button', { name: 'discover' }).click()
+    await page.getByRole('textbox', { name: 'Search GameBanana mods' }).fill('hud')
+    await page.getByRole('button', { name: 'Search' }).click()
+    const firstResult = page.locator('.provider-card').first()
+    await expect(firstResult).toBeVisible({ timeout: 30_000 })
+    await firstResult.click()
+    await expect(page.getByRole('complementary').getByRole('heading').first()).toBeVisible({ timeout: 30_000 })
+    await expect(page.getByRole('complementary').getByText('Files', { exact: true })).toBeVisible()
+  } finally {
+    await application.close()
+    await rm(userData, { recursive: true, force: true })
+  }
+})

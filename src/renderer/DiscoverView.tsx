@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import type { ProviderModDetails, ProviderModSummary, ProviderSearchResult, Snapshot } from '../shared/contracts'
 
 interface DiscoverViewProps {
@@ -12,26 +12,38 @@ export function DiscoverView({ snapshot, onInstall }: DiscoverViewProps) {
   const [selected, setSelected] = useState<ProviderModDetails>()
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string>()
+  const requestSequence = useRef(0)
   const installedIds = new Set(snapshot.installedMods.filter((mod) => mod.source === 'provider').map((mod) => mod.id))
 
   async function search(): Promise<void> {
+    const requestId = ++requestSequence.current
     setLoading(true)
     setError(undefined)
     try {
-      setResults(await window.csmm.browseProvider({ provider: 'gamebanana', query, page: 1, perPage: 20 }))
+      const nextResults = await window.csmm.browseProvider({ provider: 'gamebanana', query, page: 1, perPage: 20 })
+      if (requestId !== requestSequence.current) return
+      setResults(nextResults)
       setSelected(undefined)
     } catch (operationError) {
-      setError(operationError instanceof Error ? operationError.message : 'Could not browse GameBanana.')
+      if (requestId === requestSequence.current) setError(operationError instanceof Error ? operationError.message : 'Could not browse GameBanana.')
     } finally {
-      setLoading(false)
+      if (requestId === requestSequence.current) setLoading(false)
     }
   }
 
   async function select(mod: ProviderModSummary): Promise<void> {
+    const requestId = ++requestSequence.current
     setSelected(undefined)
     setLoading(true)
     setError(undefined)
-    try { setSelected(await window.csmm.getProviderMod('gamebanana', mod.remoteModId)) } catch (operationError) { setError(operationError instanceof Error ? operationError.message : 'Could not load mod details.') } finally { setLoading(false) }
+    try {
+      const details = await window.csmm.getProviderMod('gamebanana', mod.remoteModId)
+      if (requestId === requestSequence.current) setSelected(details)
+    } catch (operationError) {
+      if (requestId === requestSequence.current) setError(operationError instanceof Error ? operationError.message : 'Could not load mod details.')
+    } finally {
+      if (requestId === requestSequence.current) setLoading(false)
+    }
   }
 
   return <section className="panel discover-panel">

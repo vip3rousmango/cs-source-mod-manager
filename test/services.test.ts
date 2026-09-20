@@ -71,6 +71,15 @@ describe('GameBanana provider', () => {
     }
   })
 
+  it('rejects malformed browse responses instead of treating them as empty results', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ _aRecords: [] }), { status: 200 })))
+    try {
+      await expect(new GameBananaProvider().browse({ query: '', page: 1, perPage: 20 })).rejects.toMatchObject({ code: 'NETWORK_ERROR' })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it('returns plain text details and marks unsafe files non-installable', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       _idRow: 11,
@@ -93,6 +102,41 @@ describe('GameBanana provider', () => {
       expect(details.license).toBe('CC BY')
       expect(details.files[0]).toMatchObject({ id: '21', installable: true, format: 'zip' })
       expect(details.files[1]).toMatchObject({ id: '22', installable: false, format: 'rar' })
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+  it('does not install files when provider consent is explicitly false', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      _idRow: 11,
+      _sName: 'CSS HUD',
+      _sProfileUrl: 'https://gamebanana.com/mods/11',
+      _aLicenseChecklist: [{ _sText: 'Download and install this Mod', _bValue: false }],
+      _aGame: { _idRow: 2 },
+      _aFiles: [{ _idRow: 21, _sFile: 'hud.zip', _nFilesize: 12, _sAvResult: 'clean', _sAnalysisResult: 'ok' }]
+    }), { status: 200 })))
+    try {
+      const details = await new GameBananaProvider().getDetails('11')
+      expect(details.files[0].installable).toBe(false)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+  it('resolves only clean provider ZIP downloads over HTTPS', async () => {
+    const details = {
+      _idRow: 11,
+      _sName: 'CSS HUD',
+      _sProfileUrl: 'https://gamebanana.com/mods/11',
+      _aLicenseChecklist: { yes: ['Download and install this Mod'] },
+      _aGame: { _idRow: 2 },
+      _aFiles: [{ _idRow: 21, _sFile: 'hud.zip', _nFilesize: 12, _sAvResult: 'clean', _sAnalysisResult: 'ok', _sMd5Checksum: '0123456789abcdef0123456789abcdef', _sDownloadUrl: 'https://gamebanana.com/dl/21' }]
+    }
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(details), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(details), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+    try {
+      await expect(new GameBananaProvider().resolveDownload('11', '21')).resolves.toMatchObject({ url: 'https://gamebanana.com/dl/21', checksumMd5: '0123456789abcdef0123456789abcdef' })
     } finally {
       vi.unstubAllGlobals()
     }

@@ -85,6 +85,8 @@ export interface ProviderBrowseRequest {
   perPage: number
 }
 
+export type ProviderFileStatus = 'installable' | 'unsupported-format' | 'archived' | 'scan-pending' | 'scan-failed'
+
 export interface ProviderFile {
   id: string
   name: string
@@ -92,7 +94,8 @@ export interface ProviderFile {
   format: 'zip' | 'rar' | '7z' | 'other'
   version?: string
   installable: boolean
-  status: string
+  status: ProviderFileStatus
+  checksumMd5?: string
 }
 
 export interface ProviderModSummary {

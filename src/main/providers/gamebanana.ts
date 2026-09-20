@@ -1,4 +1,4 @@
-import type { ProviderBrowseRequest, ProviderFile, ProviderModDetails, ProviderModSummary, ProviderSearchResult } from '../../shared/contracts'
+import type { ProviderBrowseRequest, ProviderFile, ProviderFileStatus, ProviderModDetails, ProviderModSummary, ProviderSearchResult } from '../../shared/contracts'
 import { AppError } from '../services/errors'
 import type { ModProvider, ProviderDownload } from './mod-provider'
 
@@ -79,17 +79,40 @@ function file(value: unknown, canInstall: boolean): ProviderFile | undefined {
   const id = numberValue(item._idRow)
   const name = stringValue(item._sFile)
   if (id === undefined || !name) return undefined
-  const format = name.toLowerCase().endsWith('.zip') ? 'zip' : name.toLowerCase().endsWith('.rar') ? 'rar' : name.toLowerCase().endsWith('.7z') ? '7z' : 'other'
-  const status = [stringValue(item._sAvResult), stringValue(item._sAnalysisResult)].filter(Boolean).join(' · ') || 'Unscanned'
-  return { id: String(id), name, sizeBytes: numberValue(item._nFilesize) ?? 0, format, version: stringValue(item._sVersion), installable: canInstall && format === 'zip' && item._bIsArchived !== true && item._sAvResult === 'clean' && item._sAnalysisResult === 'ok', status }
+  const lowerName = name.toLowerCase()
+  const format = lowerName.endsWith('.zip') ? 'zip' : lowerName.endsWith('.rar') ? 'rar' : lowerName.endsWith('.7z') ? '7z' : 'other'
+  const archived = item._bIsArchived === true
+  const antivirus = stringValue(item._sAvResult)?.toLowerCase()
+  const analysis = stringValue(item._sAnalysisResult)?.toLowerCase()
+  const scanReady = antivirus === 'clean' && analysis === 'ok'
+  const status: ProviderFileStatus = archived
+    ? 'archived'
+    : format !== 'zip' || !canInstall
+      ? 'unsupported-format'
+      : antivirus === undefined || analysis === undefined
+        ? 'scan-pending'
+        : scanReady
+          ? 'installable'
+          : 'scan-failed'
+  const checksumMd5 = typeof item._sMd5Checksum === 'string' && /^[0-9a-f]{32}$/i.test(item._sMd5Checksum) ? item._sMd5Checksum.toLowerCase() : undefined
+  return { id: String(id), name, sizeBytes: numberValue(item._nFilesize) ?? 0, format, version: stringValue(item._sVersion), installable: status === 'installable', status, checksumMd5 }
 }
 
 async function fetchJson(url: string): Promise<RecordValue> {
   const response = await fetch(url)
   if (!response.ok) throw new AppError('NETWORK_ERROR', `GameBanana API returned HTTP ${response.status}.`)
   const body = await response.json().catch(() => undefined)
-  if (!body || typeof body !== 'object') throw new AppError('NETWORK_ERROR', 'GameBanana returned an invalid API response.')
+  if (!body || typeof body !== 'object' || Array.isArray(body)) throw new AppError('NETWORK_ERROR', 'GameBanana returned an invalid API response.')
   return body as RecordValue
+}
+
+function browsePayload(payload: RecordValue): { metadata: RecordValue; records: unknown[] } {
+  const metadata = record(payload._aMetadata)
+  const records = payload._aRecords
+  if (!Array.isArray(records) || !Number.isSafeInteger(metadata._nRecordCount) || (metadata._nRecordCount as number) < 0) {
+    throw new AppError('NETWORK_ERROR', 'GameBanana returned an invalid browse response.')
+  }
+  return { metadata, records }
 }
 
 export class GameBananaProvider implements ModProvider {
@@ -102,10 +125,9 @@ export class GameBananaProvider implements ModProvider {
       ? new URLSearchParams({ _sSearchString: query, _sModelName: 'Mod', _idGameRow: String(GAME_ID), _nPage: String(page), _nPerpage: String(perPage) })
       : new URLSearchParams({ _nPage: String(page), _nPerpage: String(perPage), '_aFilters[Generic_Game]': String(GAME_ID), _sSort: 'Generic_LatestUpdated' })
     const payload = await fetchJson(`${API_ROOT}/${query ? 'Util/Search/Results' : 'Mod/Index'}?${params.toString()}`)
-    const metadata = record(payload._aMetadata)
-    const records = Array.isArray(payload._aRecords) ? payload._aRecords : []
+    const { metadata, records } = browsePayload(payload)
     const mods = records.map(summary).filter((item): item is ProviderModSummary => Boolean(item))
-    const total = numberValue(metadata._nRecordCount) ?? mods.length
+    const total = metadata._nRecordCount as number
     return { provider: 'gamebanana', query: request.query, page, perPage, total, hasMore: metadata._bIsComplete !== true && page * perPage < total, mods }
   }
 
@@ -114,6 +136,7 @@ export class GameBananaProvider implements ModProvider {
     const payload = await fetchJson(`${API_ROOT}/Mod/${encodeURIComponent(remoteModId)}/ProfilePage`)
     const base = summary(payload)
     if (!base) throw new AppError('NOT_FOUND', 'The GameBanana mod was not found for Counter-Strike: Source.')
+    if (!Array.isArray(payload._aFiles)) throw new AppError('NETWORK_ERROR', 'GameBanana returned an invalid mod detail response.')
     const checklist = payload._aLicenseChecklist
     const checklistRecord = record(checklist)
     const checklistItems: unknown[] = Array.isArray(checklist)
@@ -123,10 +146,15 @@ export class GameBananaProvider implements ModProvider {
           ...(Array.isArray(checklistRecord.no) ? checklistRecord.no : [])
         ]
     const canInstall = checklistItems.some((item) => {
-      const value = typeof item === 'object' && item !== null ? record(item)._sText ?? record(item).text : item
-      return plainText(value).toLowerCase() === 'download and install this mod'
+      if (typeof item === 'object' && item !== null) {
+        const itemRecord = record(item)
+        if (itemRecord._bValue !== undefined && itemRecord._bValue !== true) return false
+        const value = itemRecord._sText ?? itemRecord.text
+        return plainText(value).toLowerCase() === 'download and install this mod'
+      }
+      return plainText(item).toLowerCase() === 'download and install this mod'
     })
-    const files = Array.isArray(payload._aFiles) ? payload._aFiles.map((item) => file(item, canInstall)).filter((item): item is ProviderFile => Boolean(item)) : []
+    const files = payload._aFiles.map((item) => file(item, canInstall)).filter((item): item is ProviderFile => Boolean(item))
     return { ...base, description: base.description || plainText(payload._sDescription), body: plainText(payload._sText, 12000), license: plainText(payload._sLicense, 1000) || undefined, files }
   }
 
@@ -139,6 +167,6 @@ export class GameBananaProvider implements ModProvider {
     const rawFile = (Array.isArray(payload._aFiles) ? payload._aFiles : []).map(record).find((candidate) => String(candidate._idRow) === remoteFileId)
     const url = stringValue(rawFile?._sDownloadUrl)
     if (!url?.startsWith('https://')) throw new AppError('NETWORK_ERROR', 'GameBanana did not provide a secure download URL.')
-    return { provider: 'gamebanana', remoteModId, remoteFileId, name: selected.name, url, sizeBytes: selected.sizeBytes, sourceUrl: details.sourceUrl }
+    return { provider: 'gamebanana', remoteModId, remoteFileId, name: selected.name, url, sizeBytes: selected.sizeBytes, checksumMd5: selected.checksumMd5, sourceUrl: details.sourceUrl }
   }
 }

@@ -112,10 +112,11 @@ function parseBrowseRequest(value: unknown): ProviderBrowseRequest {
   if (!value || typeof value !== 'object') throw new AppError('INVALID_REQUEST', 'Invalid provider browse request.')
   const request = value as Partial<ProviderBrowseRequest>
   if (request.provider !== 'gamebanana' || typeof request.query !== 'string') throw new AppError('INVALID_REQUEST', 'Invalid provider browse request.')
-  const page = typeof request.page === 'number' ? Math.floor(request.page) : 1
-  const perPage = typeof request.perPage === 'number' ? Math.floor(request.perPage) : 20
-  if (page < 1 || perPage < 1 || perPage > 30) throw new AppError('INVALID_REQUEST', 'Invalid provider pagination.')
-  return { provider: request.provider, query: request.query.slice(0, 120), page, perPage }
+  if (request.query.length > 120) throw new AppError('INVALID_REQUEST', 'Provider search query is too long.')
+  const page = request.page === undefined ? 1 : request.page
+  const perPage = request.perPage === undefined ? 20 : request.perPage
+  if (!Number.isSafeInteger(page) || page < 1 || !Number.isSafeInteger(perPage) || perPage < 1 || perPage > 30) throw new AppError('INVALID_REQUEST', 'Invalid provider pagination.')
+  return { provider: request.provider, query: request.query.trim(), page, perPage }
 }
 
 async function downloadProviderArchive(context: AppContext, providerId: ModProviderId, remoteModId: string, remoteFileId: string): Promise<Snapshot> {
@@ -136,6 +137,7 @@ async function downloadProviderArchive(context: AppContext, providerId: ModProvi
   const temporaryPath = `${archivePath}.partial`
   const output = createWriteStream(temporaryPath, { flags: 'w' })
   const hash = createHash('sha256')
+  const md5Hash = createHash('md5')
   let bytesDone = 0
   let archiveSha256: string | undefined
   try {
@@ -143,12 +145,15 @@ async function downloadProviderArchive(context: AppContext, providerId: ModProvi
       bytesDone += chunk.byteLength
       if (bytesDone > 2 * 1024 * 1024 * 1024 || (download.sizeBytes > 0 && bytesDone > download.sizeBytes)) throw new AppError('CHECKSUM_MISMATCH', 'Provider download exceeded the expected size.')
       hash.update(chunk)
+      md5Hash.update(chunk)
       if (!output.write(chunk)) await new Promise<void>((resolve) => output.once('drain', resolve))
       context.emit({ operationId, stage: 'downloading', message: `Downloaded ${bytesDone} bytes`, bytesDone, bytesTotal: download.sizeBytes || undefined })
     }
     await new Promise<void>((resolve, reject) => { output.end(() => resolve()); output.on('error', reject) })
     if (download.sizeBytes > 0 && bytesDone !== download.sizeBytes) throw new AppError('CHECKSUM_MISMATCH', 'Provider download size changed while downloading.')
     archiveSha256 = hash.digest('hex')
+    const archiveMd5 = md5Hash.digest('hex')
+    if (download.checksumMd5 && archiveMd5 !== download.checksumMd5) throw new AppError('CHECKSUM_MISMATCH', 'Provider download checksum did not match the source file.')
     await rm(archivePath, { force: true })
     await rename(temporaryPath, archivePath)
   } catch (error) {
