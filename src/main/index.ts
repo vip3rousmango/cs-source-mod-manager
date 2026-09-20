@@ -31,10 +31,13 @@ async function createWindow(): Promise<void> {
 }
 
 async function bootstrap(): Promise<void> {
+  const testUserDataPath = process.env.CSMM_TEST_USER_DATA
+  if (!app.isPackaged && testUserDataPath) app.setPath('userData', testUserDataPath)
   await app.whenReady()
-  const contentSecurityPolicy = app.isPackaged
-    ? "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:"
-    : "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' ws: http://localhost:5173; img-src 'self' data:"
+  const usingViteDevServer = typeof MAIN_WINDOW_VITE_DEV_SERVER_URL !== 'undefined' && Boolean(MAIN_WINDOW_VITE_DEV_SERVER_URL)
+  const contentSecurityPolicy = usingViteDevServer
+    ? "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self' ws: http://localhost:5173; img-src 'self' data:"
+    : "default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' data:"
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     callback({ responseHeaders: { ...details.responseHeaders, 'Content-Security-Policy': [contentSecurityPolicy] } })
   })
@@ -44,7 +47,9 @@ async function bootstrap(): Promise<void> {
   const store = new StateStore(join(stateRoot, 'state.json'))
   await store.load()
   const steam = new SteamDiscoveryService()
-  const catalogPath = join(app.isPackaged ? process.resourcesPath : process.cwd(), 'catalog', 'manifest.json')
+  const catalogPath = app.isPackaged
+    ? join(process.resourcesPath, 'catalog', 'manifest.json')
+    : process.env.CSMM_TEST_CATALOG_PATH ?? join(process.cwd(), 'catalog', 'manifest.json')
   const catalog = new CatalogService(catalogPath)
   await catalog.load()
   const emit = (event: Parameters<NonNullable<Parameters<BrowserWindow['webContents']['send']>[1]>>[0]): void => {

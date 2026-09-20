@@ -3,7 +3,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { assertSafeRelativePath, parseCatalog } from '../src/shared/validation'
-import { importFolder } from '../src/main/services/archive-import'
+import { importArchive, importFolder } from '../src/main/services/archive-import'
 import { DeploymentService } from '../src/main/services/deployment'
 import type { AppState, GameInstallation, InstalledMod, ModProfile } from '../src/shared/contracts'
 
@@ -26,6 +26,28 @@ describe('archive and catalog boundaries', () => {
     expect(() => parseCatalog({ schemaVersion: 1, catalogVersion: '1', entries: [{ id: 'demo', title: 'Demo', version: '1', description: 'Demo', tags: [], archiveUrl: 'http://example.test/mod.zip', archiveSha256: 'a'.repeat(64), archiveSizeBytes: 10, contentRoot: 'auto' }] })).toThrow()
   })
 })
+
+  it('keeps catalog entry IDs stable when titles differ', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'csmm-catalog-'))
+    try {
+      await mkdir(join(root, 'library'), { recursive: true })
+      const archivePath = join(process.cwd(), 'test/fixtures/catalog/demo-content-pack.zip')
+      const installed = await importArchive(archivePath, {
+        libraryRoot: join(root, 'library'),
+        source: 'catalog',
+        modId: 'verified-catalog-entry',
+        title: 'A Different Display Title',
+        version: '1',
+        expectedSize: 884,
+        expectedSha256: 'fae280d9cc24aa495ec535f0276d96cf670c9fd39c940dcbcbf563adcb715cd7',
+        contentRoot: 'archive-root'
+      })
+      expect(installed.id).toBe('verified-catalog-entry')
+      expect(installed.contentPath).toBe(join(root, 'library', 'mods', 'verified-catalog-entry', '1', 'content'))
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
 
 describe('profile deployment', () => {
   it('resolves priority conflicts only after confirmation and preserves unmanaged files', async () => {

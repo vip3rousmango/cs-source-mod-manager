@@ -1,4 +1,6 @@
 import { _electron as electron, expect, test } from '@playwright/test'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 function electronExecutable(): string {
@@ -7,9 +9,14 @@ function electronExecutable(): string {
   return join(process.cwd(), 'node_modules/electron/dist/electron')
 }
 
-test('launches the desktop shell and browses a populated curated catalog', async () => {
-  const fixtureRoot = join(process.cwd(), 'test/fixtures/catalog')
-  const application = await electron.launch({ cwd: fixtureRoot, executablePath: electronExecutable(), args: [join(process.cwd(), '.vite/build/index.js')] })
+test('launches the built Electron main process and browses a populated curated catalog', async () => {
+  const fixtureManifest = join(process.cwd(), 'test/fixtures/catalog/catalog/manifest.json')
+  const userData = await mkdtemp(join(tmpdir(), 'csmm-e2e-'))
+  const application = await electron.launch({
+    executablePath: electronExecutable(),
+    args: [`--user-data-dir=${userData}`, join(process.cwd(), '.vite/build/index.js')],
+    env: { ...process.env, CSMM_TEST_CATALOG_PATH: fixtureManifest, CSMM_TEST_USER_DATA: userData }
+  })
   try {
     const page = await application.firstWindow()
     await expect(page.locator('h1')).toHaveText('CS Source Mod Manager')
@@ -24,5 +31,6 @@ test('launches the desktop shell and browses a populated curated catalog', async
     await expect(page.getByText('No mods match this search.')).toBeVisible()
   } finally {
     await application.close()
+    await rm(userData, { recursive: true, force: true })
   }
 })

@@ -22,6 +22,10 @@ npm run package
 - Prefer behavior-focused tests for discovery, import safety, conflict precedence, rollback, and unmanaged-file preservation.
 - Keep the first release Counter-Strike: Source focused. General Source-engine support should be introduced through explicit game descriptors rather than scattered conditionals.
 
+## Curated catalog entries
+
+Catalog entries are maintainer-reviewed metadata in `catalog/manifest.json`; the production manifest must not contain placeholders or synthetic test archives. Each entry requires a useful Counter-Strike: Source ZIP, a stable immutable direct HTTPS URL, exact byte size, lowercase SHA-256, author/source attribution, and verified permission to link to and download the archive. Do not commit third-party archives or expiring CDN mirror URLs. Keep browser-only fixtures under `test/fixtures`.
+
 ## Pull requests
 
 Describe the user-visible behavior, safety implications, and verification commands. Include screenshots for renderer changes and fixture coverage for filesystem or deployment changes.

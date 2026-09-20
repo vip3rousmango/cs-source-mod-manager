@@ -22,7 +22,7 @@ function CatalogView({ snapshot, onInstall, onOpenLibrary }: { snapshot: Snapsho
       return matchesTag && (!normalizedQuery || searchable.includes(normalizedQuery))
     })
   }, [activeTag, query, snapshot.catalog.entries])
-  const selectedEntry = snapshot.catalog.entries.find((entry) => entry.id === selectedId) ?? filteredEntries[0]
+  const selectedEntry = filteredEntries.find((entry) => entry.id === selectedId) ?? filteredEntries[0]
 
   return <section className="panel catalog-panel">
     <div className="section-heading catalog-heading">
@@ -33,7 +33,7 @@ function CatalogView({ snapshot, onInstall, onOpenLibrary }: { snapshot: Snapsho
       <label className="search-field"><span className="sr-only">Search mods</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search mods, authors, tags…" /></label>
       <label className="tag-field"><span className="sr-only">Filter by tag</span><select value={activeTag} onChange={(event) => setActiveTag(event.target.value)}><option value="all">All tags</option>{tags.map((tag) => <option key={tag} value={tag}>{tag}</option>)}</select></label>
     </div>
-    {snapshot.catalog.entries.length === 0 ? <div className="empty catalog-empty"><strong>The curated catalog is ready for verified entries.</strong><span>No mod archives are bundled yet. Add a real entry to <code>catalog/manifest.json</code> with a direct HTTPS ZIP, exact byte size, SHA-256, attribution, and redistribution permission. Unverified downloads are intentionally never shown.</span><span>For immediate testing, use <button className="link-button" onClick={onOpenLibrary}>Library → Import folder or ZIP</button>.</span></div> : filteredEntries.length === 0 ? <div className="empty catalog-empty">No mods match this search. Try another title or clear the tag filter.</div> : <div className="catalog-layout">
+    {snapshot.catalog.entries.length === 0 ? <div className="empty catalog-empty"><strong>No curated downloads are available in this build.</strong><span>Import a ZIP or extracted mod folder from Library to add content. Curated downloads will appear here when this build includes verified sources.</span><span>For immediate testing, use <button className="link-button" onClick={onOpenLibrary}>Library → Import folder or ZIP</button>.</span></div> : filteredEntries.length === 0 ? <div className="empty catalog-empty">No mods match this search. Try another title or clear the tag filter.</div> : <div className="catalog-layout">
       <div className="catalog-grid">{filteredEntries.map((entry) => {
         const installed = installedIds.has(entry.id)
         return <button className={`catalog-card${selectedEntry?.id === entry.id ? ' selected' : ''}`} key={entry.id} onClick={() => setSelectedId(entry.id)}>

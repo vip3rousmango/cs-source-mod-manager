@@ -46,7 +46,7 @@ async function downloadCatalogArchive(context: AppContext, id: string): Promise<
   await mkdir(downloads, { recursive: true })
   const archivePath = join(downloads, `${entry.id}-${entry.version}.zip`)
   const response = await fetch(entry.archiveUrl)
-  if (!response.ok || !response.body) throw new AppError('NETWORK_ERROR', `Download failed with HTTP ${response.status}.`)
+  if (!response.ok || !response.body || !response.url.startsWith('https://')) throw new AppError('NETWORK_ERROR', `Download failed with HTTP ${response.status}.`)
   const temporaryPath = `${archivePath}.partial`
   const output = createWriteStream(temporaryPath, { flags: 'w' })
   const hash = createHash('sha256')
@@ -68,7 +68,7 @@ async function downloadCatalogArchive(context: AppContext, id: string): Promise<
     await rm(temporaryPath, { force: true })
     throw error
   }
-  const installed = await importArchive(archivePath, { libraryRoot: context.libraryRoot, source: 'catalog', title: entry.title, version: entry.version, author: entry.author, description: entry.description, sourceUrl: entry.sourcePageUrl, expectedSha256: entry.archiveSha256, expectedSize: entry.archiveSizeBytes, contentRoot: entry.contentRoot, emit: context.emit })
+  const installed = await importArchive(archivePath, { libraryRoot: context.libraryRoot, source: 'catalog', modId: entry.id, title: entry.title, version: entry.version, author: entry.author, description: entry.description, sourceUrl: entry.sourcePageUrl, expectedSha256: entry.archiveSha256, expectedSize: entry.archiveSizeBytes, contentRoot: entry.contentRoot, emit: context.emit })
   const state = context.store.get()
   const existing = state.installedMods.filter((mod) => mod.id !== installed.id)
   await context.store.save({ ...state, installedMods: [...existing, installed], settings: { catalogVersion: context.catalog.get().catalogVersion } })

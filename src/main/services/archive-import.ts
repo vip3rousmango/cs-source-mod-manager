@@ -14,6 +14,7 @@ const IGNORED_FILES = new Set(['readme', 'readme.txt', 'license', 'license.txt',
 export interface ImportOptions {
   libraryRoot: string
   source: ModSource
+  modId?: string
   title?: string
   version?: string
   author?: string
@@ -40,11 +41,12 @@ async function readEntries(archivePath: string): Promise<SafeEntry[]> {
       zip.readEntry()
       zip.on('entry', (entry) => {
         try {
-          const path = assertSafeRelativePath(entry.fileName)
-          const directory = path.endsWith('/')
           const unixType = (entry.externalFileAttributes >>> 16) & 0o170000
-          if (unixType === 0o120000) throw new AppError('INVALID_ARCHIVE', 'Symbolic links are not supported in mod archives.')
-          entries.push({ path: directory ? path.slice(0, -1) : path, directory, size: entry.uncompressedSize, source: entry.fileName })
+          if (unixType !== 0 && unixType !== 0o040000 && unixType !== 0o100000) throw new AppError('INVALID_ARCHIVE', 'Only regular files and directories are supported in mod archives.')
+          const directory = entry.fileName.endsWith('/') || unixType === 0o040000
+          const candidatePath = directory && entry.fileName.endsWith('/') ? entry.fileName.slice(0, -1) : entry.fileName
+          const path = assertSafeRelativePath(candidatePath)
+          entries.push({ path, directory, size: entry.uncompressedSize, source: entry.fileName })
           zip.readEntry()
         } catch (entryError) { zip.close(); reject(entryError) }
       })
@@ -124,7 +126,7 @@ export async function importArchive(archivePath: string, options: ImportOptions)
       await extractEntry(archivePath, original.source, target)
     }
     const title = options.title ?? basename(archivePath, extname(archivePath))
-    const modId = safeId(title)
+    const modId = options.modId ?? safeId(title)
     const version = options.version ?? 'local'
     const contentPath = join(options.libraryRoot, 'mods', modId, version, 'content')
     await rm(contentPath, { recursive: true, force: true })
