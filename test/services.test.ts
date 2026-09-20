@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import type { AppState, GameInstallation, InstalledMod, ModProfile } from '../src/shared/contracts'
 import { assertSafeRelativePath, parseCatalog } from '../src/shared/validation'
 import { importArchive, importFolder } from '../src/main/services/archive-import'
+import { ServerCacheService } from '../src/main/services/server-cache'
 import { DeploymentService } from '../src/main/services/deployment'
 import { GameBananaProvider } from '../src/main/providers/gamebanana'
 
@@ -90,6 +91,7 @@ describe('GameBanana provider', () => {
       _sLicense: '<p>CC BY</p>',
       _aLicenseChecklist: [{ _sText: 'Download and install this Mod', _bValue: true }],
       _aGame: { _idRow: 2 },
+      _aTags: [{ _sTitle: 'Origins', _sValue: 'Default' }],
       _aFiles: [
         { _idRow: 21, _sFile: 'hud.zip', _nFilesize: 12, _sVersion: '1.0', _sDownloadUrl: 'https://gamebanana.com/dl/21', _sAvResult: 'clean', _sAnalysisResult: 'ok', _sMd5Checksum: '0123456789abcdef0123456789abcdef' },
         { _idRow: 22, _sFile: 'hud.rar', _nFilesize: 12, _sDownloadUrl: 'https://gamebanana.com/dl/22', _sAvResult: 'clean', _sAnalysisResult: 'ok' }
@@ -99,6 +101,7 @@ describe('GameBanana provider', () => {
     try {
       const details = await new GameBananaProvider().getDetails('11')
       expect(details.body).toBe('Hello world')
+      expect(details.tags).toEqual(['Origins'])
       expect(details.license).toBe('CC BY')
       expect(details.files[0]).toMatchObject({ id: '21', installable: true, format: 'zip' })
       expect(details.files[1]).toMatchObject({ id: '22', installable: false, format: 'rar' })
@@ -155,6 +158,30 @@ describe('GameBanana provider', () => {
       await expect(new GameBananaProvider().resolveDownload('11', '21')).resolves.toMatchObject({ url: 'https://gamebanana.com/dl/21', checksumMd5: '0123456789abcdef0123456789abcdef' })
     } finally {
       vi.unstubAllGlobals()
+    }
+  })
+})
+describe('server download cache', () => {
+  it('scans and cleans only the game download directory', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'csmm-server-cache-'))
+    try {
+      const contentPath = join(root, 'cstrike')
+      await mkdir(join(contentPath, 'download', 'materials'), { recursive: true })
+      await mkdir(join(contentPath, 'custom'), { recursive: true })
+      await writeFile(join(contentPath, 'custom', 'keep.txt'), 'keep')
+      await writeFile(join(contentPath, 'download', 'materials', 'server.vmt'), 'server')
+      const game: GameInstallation = { gameId: 'counter-strike-source', steamRoot: root, installPath: root, contentPath, detectedAt: new Date().toISOString() }
+      const service = new ServerCacheService()
+      const scanned = await service.scan(game)
+      expect(scanned.available).toBe(true)
+      expect(scanned.items.some((item) => item.relativePath === 'materials/server.vmt')).toBe(true)
+      expect(scanned.totalBytes).toBe(6)
+      const cleaned = await service.clean(game)
+      expect(cleaned.items).toHaveLength(0)
+      expect(await readFile(join(contentPath, 'custom', 'keep.txt'), 'utf8')).toBe('keep')
+      expect(await readFile(join(contentPath, 'download', 'materials', 'server.vmt')).catch(() => undefined)).toBeUndefined()
+    } finally {
+      await rm(root, { recursive: true, force: true })
     }
   })
 })

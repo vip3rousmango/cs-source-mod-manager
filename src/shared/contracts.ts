@@ -85,7 +85,7 @@ export interface ProviderBrowseRequest {
   perPage: number
 }
 
-export type ProviderFileStatus = 'installable' | 'unsupported-format' | 'archived' | 'scan-pending' | 'scan-failed' | 'checksum-missing'
+export type ProviderFileStatus = 'installable' | 'unsupported-format' | 'archived' | 'scan-pending' | 'scan-failed' | 'checksum-missing' | 'permission-denied'
 
 export interface ProviderFile {
   id: string
@@ -125,6 +125,20 @@ export interface ProviderModDetails extends ProviderModSummary {
   body: string
   license?: string
   files: ProviderFile[]
+}
+export interface ServerCacheItem {
+  relativePath: string
+  sizeBytes: number
+  modifiedAt: string
+  kind: 'file' | 'directory'
+}
+
+export interface ServerCacheSnapshot {
+  available: boolean
+  rootPath?: string
+  totalBytes: number
+  items: ServerCacheItem[]
+  truncated: boolean
 }
 
 export interface AppState {
@@ -220,6 +234,9 @@ export interface IPCAPI {
   deployProfile(profileId: string, confirmConflicts: boolean): Promise<Snapshot>
   removeInstalledMod(modId: string): Promise<Snapshot>
   openManagedFolder(): Promise<void>
+  shareInstalledMod(modId: string): Promise<void>
+  getServerCache(): Promise<ServerCacheSnapshot>
+  cleanServerCache(confirm: boolean): Promise<ServerCacheSnapshot>
   subscribeToProgress(listener: (event: ProgressEvent) => void): () => void
 }
 

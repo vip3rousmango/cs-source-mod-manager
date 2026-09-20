@@ -47,7 +47,7 @@ function previewImage(value: unknown): string | undefined {
 
 function tags(value: unknown): string[] {
   if (!Array.isArray(value)) return []
-  return value.map((tag) => typeof tag === 'string' ? tag : stringValue(record(tag)._sName)).filter((tag): tag is string => Boolean(tag))
+  return value.map((tag) => typeof tag === 'string' ? tag : stringValue(record(tag)._sName ?? record(tag)._sTitle ?? record(tag)._sValue)).filter((tag): tag is string => Boolean(tag))
 }
 
 function isCssRecord(value: unknown): boolean {
@@ -88,15 +88,17 @@ function file(value: unknown, canInstall: boolean): ProviderFile | undefined {
   const checksumMd5 = typeof item._sMd5Checksum === 'string' && /^[0-9a-f]{32}$/i.test(item._sMd5Checksum) ? item._sMd5Checksum.toLowerCase() : undefined
   const status: ProviderFileStatus = archived
     ? 'archived'
-    : format !== 'zip' || !canInstall
+    : format !== 'zip'
       ? 'unsupported-format'
-      : antivirus === undefined || analysis === undefined
-        ? 'scan-pending'
-        : !scanReady
-          ? 'scan-failed'
-          : checksumMd5 === undefined
-            ? 'checksum-missing'
-            : 'installable'
+      : !canInstall
+        ? 'permission-denied'
+        : antivirus === undefined || analysis === undefined
+          ? 'scan-pending'
+          : !scanReady
+            ? 'scan-failed'
+            : checksumMd5 === undefined
+              ? 'checksum-missing'
+              : 'installable'
   return { id: String(id), name, sizeBytes: numberValue(item._nFilesize) ?? 0, format, version: stringValue(item._sVersion), installable: status === 'installable', status, checksumMd5 }
 }
 

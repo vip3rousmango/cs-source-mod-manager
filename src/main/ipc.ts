@@ -1,4 +1,4 @@
-import { BrowserWindow, dialog, ipcMain, shell } from 'electron'
+import { BrowserWindow, clipboard, dialog, ipcMain, shell } from 'electron'
 import { createWriteStream } from 'node:fs'
 import { mkdir, rename, rm, stat } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
@@ -11,6 +11,7 @@ import { SteamDiscoveryService } from './services/steam-discovery'
 import { CatalogService } from './services/catalog'
 import { DeploymentService } from './services/deployment'
 import { importArchive, importFolder } from './services/archive-import'
+import { ServerCacheService } from './services/server-cache'
 import { GameBananaProvider } from './providers/gamebanana'
 import type { ModProvider } from './providers/mod-provider'
 interface AppContext {
@@ -20,6 +21,7 @@ interface AppContext {
   catalog: CatalogService
   deployment: DeploymentService
   providers: Map<ModProviderId, ModProvider>
+  serverCache: ServerCacheService
   libraryRoot: string
   emit: (event: ProgressEvent) => void
 }
@@ -273,6 +275,19 @@ export function registerIpc(context: AppContext): void {
     await rm(managedModPath(current, mod), { recursive: true, force: true })
     await current.store.save({ ...state, installedMods: state.installedMods.filter((candidate) => candidate.id !== modId) })
     return snapshot(current)
+  })))
+  ipcMain.handle('shareInstalledMod', guard((current, modId: string) => {
+    const mod = current.store.get().installedMods.find((candidate) => candidate.id === modId)
+    if (!mod) throw new AppError('NOT_FOUND', 'Installed mod was not found.')
+    clipboard.writeText([`CS Source Mod: ${mod.title}`, `Version: ${mod.version}`, mod.sourceUrl ? `Source: ${mod.sourceUrl}` : undefined, `Managed content: ${mod.contentPath}`].filter(Boolean).join('\n'))
+  }))
+  ipcMain.handle('getServerCache', guard((current) => current.serverCache.scan(current.store.get().game)))
+  ipcMain.handle('cleanServerCache', guard((current, value: unknown) => enqueueMutation(async () => {
+    if (value !== true) throw new AppError('INVALID_REQUEST', 'Confirm server cache cleanup before continuing.')
+    assertWritable(current)
+    const cache = await current.serverCache.scan(current.store.get().game)
+    if (cache.truncated) throw new AppError('INVALID_REQUEST', 'Server cache is too large to clean safely in one operation. Narrow the cache before retrying.')
+    return current.serverCache.clean(current.store.get().game)
   })))
   ipcMain.handle('openManagedFolder', guard(async (current) => {
     const game = current.store.get().game

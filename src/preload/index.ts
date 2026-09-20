@@ -16,6 +16,9 @@ const api: IPCAPI = {
   previewProfile: (profileId) => ipcRenderer.invoke('previewProfile', profileId),
   deployProfile: (profileId, confirmConflicts) => ipcRenderer.invoke('deployProfile', { profileId, confirmConflicts }),
   removeInstalledMod: (modId) => ipcRenderer.invoke('removeInstalledMod', modId),
+  shareInstalledMod: (modId) => ipcRenderer.invoke('shareInstalledMod', modId),
+  getServerCache: () => ipcRenderer.invoke('getServerCache'),
+  cleanServerCache: (confirm) => ipcRenderer.invoke('cleanServerCache', confirm),
   openManagedFolder: () => ipcRenderer.invoke('openManagedFolder'),
   subscribeToProgress: (listener: (event: ProgressEvent) => void) => {
     const wrapped = (_event: Electron.IpcRendererEvent, value: ProgressEvent): void => listener(value)
