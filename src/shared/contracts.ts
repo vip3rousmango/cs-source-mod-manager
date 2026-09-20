@@ -129,6 +129,11 @@ export interface ProviderModSummary {
   hasFiles: boolean
 }
 
+export interface ProviderCategory {
+  value: string
+  count: number
+}
+
 export interface ProviderSearchResult {
   provider: ModProviderId
   query: string
@@ -136,6 +141,7 @@ export interface ProviderSearchResult {
   perPage: number
   total: number
   hasMore: boolean
+  categories: ProviderCategory[]
   mods: ProviderModSummary[]
 }
 

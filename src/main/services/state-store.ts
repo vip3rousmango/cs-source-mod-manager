@@ -28,10 +28,14 @@ export class StateStore {
         throw new AppError('RECOVERY_REQUIRED', 'State schema is not supported; preserve the state file before recovery.', { schemaVersion: parsed.schemaVersion })
       }
       const interruptedAt = new Date().toISOString()
-      const activity = (parsed.activity ?? []).map((item) => item.status === 'running'
-        ? { ...item, status: 'failure' as const, message: 'Operation was interrupted before completion.', finishedAt: interruptedAt }
-        : item)
+      let interrupted = false
+      const activity = (parsed.activity ?? []).map((item) => {
+        if (item.status !== 'running') return item
+        interrupted = true
+        return { ...item, status: 'failure' as const, message: 'Operation was interrupted before completion.', finishedAt: interruptedAt }
+      })
       this.state = { ...parsed, detectedGames: parsed.detectedGames ?? [], modPacks: parsed.modPacks ?? [], activity }
+      if (interrupted) await this.save()
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         this.state = structuredClone(emptyState)

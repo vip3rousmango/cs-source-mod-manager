@@ -159,6 +159,27 @@ describe('activity persistence', () => {
       await rm(root, { recursive: true, force: true })
     }
   })
+  it('persists interrupted activity recovery and normalizes legacy game detection', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'csmm-legacy-state-'))
+    try {
+      const filePath = join(root, 'state.json')
+      await writeFile(filePath, JSON.stringify({
+        schemaVersion: 1,
+        settings: {},
+        installedMods: [],
+        profiles: [],
+        activity: [{ id: 'operation-legacy', operation: 'Install community mod', status: 'running', message: 'started', startedAt: new Date(0).toISOString() }]
+      }))
+      const store = new StateStore(filePath)
+      const state = await store.load()
+      expect(state.detectedGames).toEqual([])
+      expect(state.activity[0].status).toBe('failure')
+      const persisted = JSON.parse(await readFile(filePath, 'utf8')) as { activity: Array<{ status: string }> }
+      expect(persisted.activity[0].status).toBe('failure')
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
   it('does not overwrite preserved recovery state when a mutation is attempted', async () => {
     const root = await mkdtemp(join(tmpdir(), 'csmm-recovery-'))
     try {

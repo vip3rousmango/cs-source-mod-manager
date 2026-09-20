@@ -90,7 +90,7 @@ export class DeploymentService {
         await cp(winner.absolutePath, destination)
         files.push({ relativePath: winner.relativePath, ownerModId: winner.modId, sha256: await sha256(destination) })
         copied += 1
-        this.emit({ operationId: profileId, stage: 'deploying', message: `Copied ${copied} files`, bytesDone: copied, bytesTotal: winners.size })
+        this.emit({ operationId, stage: 'deploying', message: `Copied ${copied} files`, bytesDone: copied, bytesTotal: winners.size })
       }
       if (await exists(replacementRoot)) {
         await mkdir(dirname(backupRoot), { recursive: true })

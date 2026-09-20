@@ -66,6 +66,19 @@ function safeManagedContentPath(context: AppContext, mod: AppState['installedMod
 function throwIfCancelled(context: AppContext): void {
   if (context.abortController?.signal.aborted) throw new AppError('OPERATION_CANCELLED', 'Operation cancelled. No managed content was changed.')
 }
+async function waitForSignal(ms: number, signal?: AbortSignal): Promise<void> {
+  if (ms <= 0) return
+  await new Promise<void>((resolve, reject) => {
+    const cleanup = (): void => signal?.removeEventListener('abort', abort)
+    const timer = setTimeout(() => { cleanup(); resolve() }, ms)
+    const abort = (): void => {
+      clearTimeout(timer)
+      cleanup()
+      reject(new AppError('OPERATION_CANCELLED', 'Operation cancelled. No managed content was changed.'))
+    }
+    signal?.addEventListener('abort', abort, { once: true })
+  })
+}
 
 
 
@@ -104,7 +117,7 @@ export async function runTrackedMutation<T>(context: AppContext, operation: stri
       ...current,
       activity: current.activity.map((item) => item.id === id ? { ...item, status: appError.code === 'OPERATION_CANCELLED' ? 'cancelled' : 'failure', message: appError.message, finishedAt: new Date().toISOString() } : item)
     })
-    throw error
+    throw appError
   } finally {
     context.emit = emit
     context.operationId = undefined
@@ -258,9 +271,19 @@ function parseBrowseRequest(value: unknown): ProviderBrowseRequest {
 }
 
 async function downloadProviderArchive(context: AppContext, providerId: ModProviderId, remoteModId: string, remoteFileId: string): Promise<Snapshot> {
-  const downloadFixture = await loadProviderFixture<{ error?: unknown }>('download')
-  if (downloadFixture?.error) throw new AppError('NETWORK_ERROR', String(downloadFixture.error))
+  const downloadFixture = await loadProviderFixture<{ error?: unknown; progressDelayMs?: unknown }>('download')
   assertWritable(context)
+  if (downloadFixture?.error) {
+    const operationId = context.operationId ?? `download-${providerId}-${remoteModId}-${remoteFileId}-${Date.now()}`
+    const delay = typeof downloadFixture.progressDelayMs === 'number' && Number.isFinite(downloadFixture.progressDelayMs) ? Math.max(0, Math.min(10_000, downloadFixture.progressDelayMs)) : 0
+    context.emit({ operationId, stage: 'validating', message: 'Validating provider archive before install.', bytesDone: 0, bytesTotal: 1 })
+    await waitForSignal(delay, context.abortController?.signal)
+    throwIfCancelled(context)
+    context.emit({ operationId, stage: 'staging', message: 'Staging provider content for review.', bytesDone: 0, bytesTotal: 1 })
+    await waitForSignal(delay, context.abortController?.signal)
+    throwIfCancelled(context)
+    throw new AppError('NETWORK_ERROR', String(downloadFixture.error))
+  }
   const provider = getProvider(context, providerId)
   const details = await provider.getDetails(remoteModId, 'counter-strike-source')
   if (details.gameId !== 'counter-strike-source') throw new AppError('UNSUPPORTED_FORMAT', 'Only Counter-Strike: Source content can be installed into this library.')
@@ -415,11 +438,14 @@ export function registerIpc(context: AppContext): void {
     const failures: Array<{ title: string; message: string }> = []
     let completed = 0
     for (const entry of pack.entries) {
+      throwIfCancelled(current)
       try {
         await downloadProviderArchive(current, entry.provider, entry.remoteModId, entry.remoteFileId)
         completed += 1
       } catch (error) {
-        failures.push({ title: entry.title, message: toAppError(error).message })
+        const appError = toAppError(error)
+        if (appError.code === 'OPERATION_CANCELLED') throw appError
+        failures.push({ title: entry.title, message: appError.message })
       }
     }
     return { ...snapshot(current), packInstall: { packId: pack.id, completed, failures } }

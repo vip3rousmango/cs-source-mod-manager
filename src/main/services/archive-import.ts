@@ -68,12 +68,14 @@ function storageSegment(value: string, label: string): string {
 }
 
 async function extractEntries(archivePath: string, normalized: SafeEntry[], staging: string, signal?: AbortSignal, emit?: (event: ProgressEvent) => void): Promise<void> {
-  const destinations = new Map(normalized.map((entry) => [entry.source, join(staging, entry.path)]))
+  const destinations = new Map(normalized.map((entry) => [entry.source, { path: join(staging, entry.path), size: entry.size }]))
+  const totalBytes = normalized.reduce((sum, entry) => sum + entry.size, 0)
   await new Promise<void>((resolve, reject) => {
     yauzl.open(archivePath, { lazyEntries: true }, (error, zip) => {
       if (error || !zip) return reject(error ?? new Error('Cannot open ZIP'))
       let settled = false
       let extracted = 0
+      let extractedBytes = 0
       const fail = (cause: unknown): void => {
         if (settled) return
         settled = true
@@ -89,8 +91,9 @@ async function extractEntries(archivePath: string, normalized: SafeEntry[], stag
         }
       }
       zip.on('entry', (entry) => {
-        const destination = destinations.get(entry.fileName)
-        if (!destination) return next()
+        const target = destinations.get(entry.fileName)
+        if (!target) return next()
+        const destination = target.path
         try { throwIfAborted(signal) } catch (entryError) { return fail(entryError) }
         void mkdir(dirname(destination), { recursive: true }).then(() => {
           if (settled) return
@@ -108,7 +111,8 @@ async function extractEntries(archivePath: string, normalized: SafeEntry[], stag
             output.on('finish', () => {
               cleanup()
               extracted += 1
-              emit?.({ operationId: 'import', stage: 'staging', message: `Unpacked ${entry.fileName}`, bytesDone: extracted, bytesTotal: normalized.length })
+              extractedBytes += target.size
+              emit?.({ operationId: 'import', stage: 'staging', message: `Unpacked ${entry.fileName} (${extracted}/${normalized.length} files)`, bytesDone: extractedBytes, bytesTotal: totalBytes })
               next()
             })
             stream.pipe(output)
@@ -135,6 +139,7 @@ async function readEntryText(archivePath: string, sourceName: string, maxBytes =
       zip.on('entry', (entry) => {
         if (entry.fileName !== sourceName) return next()
         found = true
+        if (entry.uncompressedSize > maxBytes) { zip.close(); return resolve(undefined) }
         zip.openReadStream(entry, (streamError, stream) => {
           if (streamError || !stream) return reject(streamError ?? new Error('Cannot read ZIP entry'))
           const chunks: Buffer[] = []
@@ -215,14 +220,15 @@ export async function importArchive(archivePath: string, options: ImportOptions)
     const text = await readEntryText(archivePath, entry.source)
     return text?.trim() ? `## ${entry.path}\n${text.trim()}` : undefined
   }))
+  const totalBytes = normalized.reduce((sum, entry) => sum + entry.size, 0)
   const installationNotes = instructionParts.filter((part): part is string => Boolean(part)).join('\n\n').slice(0, 96 * 1024) || undefined
-  options.emit?.({ operationId: 'import', stage: 'validating', message: `Archive is safe. Found ${normalized.length} content file${normalized.length === 1 ? '' : 's'}${installationNotes ? ' and install notes for review' : ''}.`, bytesDone: normalized.length, bytesTotal: normalized.length })
+  options.emit?.({ operationId: 'import', stage: 'validating', message: `Archive is safe. Found ${normalized.length} content file${normalized.length === 1 ? '' : 's'}${installationNotes ? ' and install notes for review' : ''}.`, bytesDone: 0, bytesTotal: totalBytes })
   await mkdir(options.libraryRoot, { recursive: true })
   const staging = await mkdtemp(join(options.libraryRoot, '.staging-'))
   try {
-    options.emit?.({ operationId: 'import', stage: 'staging', message: `Unpacking ${normalized.length} content file${normalized.length === 1 ? '' : 's'} in one pass.`, bytesDone: 0, bytesTotal: normalized.length })
+    options.emit?.({ operationId: 'import', stage: 'staging', message: `Unpacking ${normalized.length} content file${normalized.length === 1 ? '' : 's'} in one pass.`, bytesDone: 0, bytesTotal: totalBytes })
     await extractEntries(archivePath, normalized, staging, options.signal, options.emit)
-    options.emit?.({ operationId: 'import', stage: 'staging', message: `Unpacked ${normalized.length} content file${normalized.length === 1 ? '' : 's'}.`, bytesDone: normalized.length, bytesTotal: normalized.length })
+    options.emit?.({ operationId: 'import', stage: 'staging', message: `Unpacked ${normalized.length} content file${normalized.length === 1 ? '' : 's'}.`, bytesDone: totalBytes, bytesTotal: totalBytes })
     throwIfAborted(options.signal)
     const title = options.title ?? basename(archivePath, extname(archivePath))
     const modId = options.modId ?? safeId(title)
