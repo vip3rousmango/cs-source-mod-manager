@@ -1,5 +1,5 @@
 import { createReadStream, createWriteStream } from 'node:fs'
-import { access, cp, mkdir, mkdtemp, readdir, rm, stat } from 'node:fs/promises'
+import { access, cp, mkdir, mkdtemp, readdir, readFile, rename, rm, stat } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { basename, dirname, extname, join, relative } from 'node:path'
 import yauzl from 'yauzl'
@@ -28,6 +28,7 @@ export interface ImportOptions {
   expectedSha256?: string
   expectedSize?: number
   contentRoot?: CatalogEntry['contentRoot']
+  signal?: AbortSignal
   emit?: (event: ProgressEvent) => void
 }
 
@@ -66,26 +67,104 @@ function storageSegment(value: string, label: string): string {
   return value
 }
 
-async function extractEntry(archivePath: string, sourceName: string, destination: string): Promise<void> {
+async function extractEntries(archivePath: string, normalized: SafeEntry[], staging: string, signal?: AbortSignal, emit?: (event: ProgressEvent) => void): Promise<void> {
+  const destinations = new Map(normalized.map((entry) => [entry.source, { path: join(staging, entry.path), size: entry.size }]))
+  const totalBytes = normalized.reduce((sum, entry) => sum + entry.size, 0)
   await new Promise<void>((resolve, reject) => {
     yauzl.open(archivePath, { lazyEntries: true }, (error, zip) => {
       if (error || !zip) return reject(error ?? new Error('Cannot open ZIP'))
+      let settled = false
+      let extracted = 0
+      let extractedBytes = 0
+      const fail = (cause: unknown): void => {
+        if (settled) return
+        settled = true
+        zip.close()
+        reject(cause)
+      }
+      const next = (): void => {
+        try {
+          throwIfAborted(signal)
+          zip.readEntry()
+        } catch (entryError) {
+          fail(entryError)
+        }
+      }
+      zip.on('entry', (entry) => {
+        const target = destinations.get(entry.fileName)
+        if (!target) return next()
+        const destination = target.path
+        try { throwIfAborted(signal) } catch (entryError) { return fail(entryError) }
+        void mkdir(dirname(destination), { recursive: true }).then(() => {
+          if (settled) return
+          zip.openReadStream(entry, (streamError, stream) => {
+            if (streamError || !stream) return fail(streamError ?? new Error('Cannot read ZIP entry'))
+            const output = createWriteStream(destination, { flags: 'wx' })
+            const abort = (): void => { stream.destroy(new AppError('OPERATION_CANCELLED', 'Operation cancelled. No managed content was changed.')) }
+            signal?.addEventListener('abort', abort, { once: true })
+            const cleanup = (): void => signal?.removeEventListener('abort', abort)
+            stream.on('data', () => {
+              if (signal?.aborted) abort()
+            })
+            stream.on('error', (streamFailure) => { cleanup(); fail(streamFailure) })
+            output.on('error', (outputFailure) => { cleanup(); stream.destroy(); fail(outputFailure) })
+            output.on('finish', () => {
+              cleanup()
+              extracted += 1
+              extractedBytes += target.size
+              emit?.({ operationId: 'import', stage: 'staging', message: `Unpacked ${entry.fileName} (${extracted}/${normalized.length} files)`, bytesDone: extractedBytes, bytesTotal: totalBytes })
+              next()
+            })
+            stream.pipe(output)
+          })
+        }).catch(fail)
+      })
+      zip.on('end', () => {
+        if (!settled) {
+          settled = true
+          resolve()
+        }
+      })
+      zip.on('error', fail)
+      next()
+    })
+  })
+}
+async function readEntryText(archivePath: string, sourceName: string, maxBytes = 32 * 1024): Promise<string | undefined> {
+  return await new Promise<string | undefined>((resolve, reject) => {
+    yauzl.open(archivePath, { lazyEntries: true }, (error, zip) => {
+      if (error || !zip) return reject(error ?? new Error('Cannot open ZIP'))
+      let found = false
       const next = (): void => zip.readEntry()
       zip.on('entry', (entry) => {
         if (entry.fileName !== sourceName) return next()
+        found = true
+        if (entry.uncompressedSize > maxBytes) { zip.close(); return resolve(undefined) }
         zip.openReadStream(entry, (streamError, stream) => {
           if (streamError || !stream) return reject(streamError ?? new Error('Cannot read ZIP entry'))
-          const target = createWriteStream(destination, { flags: 'wx' })
-          stream.pipe(target)
-          target.on('finish', () => { zip.close(); resolve() })
-          target.on('error', reject)
+          const chunks: Buffer[] = []
+          let total = 0
+          stream.on('data', (chunk: Buffer) => {
+            total += chunk.length
+            if (total <= maxBytes) chunks.push(chunk)
+          })
+          stream.on('end', () => { zip.close(); resolve(Buffer.concat(chunks).toString('utf8').slice(0, maxBytes)) })
+          stream.on('error', reject)
         })
       })
-      zip.on('end', () => reject(new Error(`ZIP entry ${sourceName} not found`)))
+      zip.on('end', () => { if (!found) resolve(undefined) })
       zip.on('error', reject)
       next()
     })
   })
+}
+function throwIfAborted(signal?: AbortSignal): void {
+  if (signal?.aborted) throw new AppError('OPERATION_CANCELLED', 'Operation cancelled. No managed content was changed.')
+}
+
+function instructionFile(path: string): boolean {
+  const name = basename(path).toLowerCase()
+  return name.startsWith('readme') || name.startsWith('install') || name.startsWith('instruction') || name.startsWith('note')
 }
 
 function normalizeEntries(entries: SafeEntry[], contentRoot: CatalogEntry['contentRoot'] = 'auto'): SafeEntry[] {
@@ -94,15 +173,20 @@ function normalizeEntries(entries: SafeEntry[], contentRoot: CatalogEntry['conte
   if (meaningful.some((entry) => basename(entry.path).toLowerCase() === 'gameinfo.txt')) {
     throw new AppError('INVALID_CONTENT', 'This archive is a complete Source mod; import Counter-Strike: Source custom content instead.')
   }
-  const topRoots = new Set(meaningful.map((entry) => entry.path.split('/')[0].toLowerCase()))
-  let strip = ''
-  if (contentRoot === 'single-directory' || (contentRoot === 'auto' && topRoots.size === 1 && ![...topRoots].some((root) => CONTENT_ROOTS.has(root)))) {
-    strip = [...topRoots][0] ?? ''
+  const contentCandidates = meaningful.flatMap((entry) => {
+    const segments = entry.path.split('/')
+    const rootIndex = segments.findIndex((segment) => CONTENT_ROOTS.has(segment.toLowerCase()))
+    return rootIndex < 0 ? [] : [{ entry, prefix: segments.slice(0, rootIndex) }]
+  })
+  if (contentCandidates.length === 0) throw new AppError('INVALID_CONTENT', 'No recognized Counter-Strike: Source content folders were found.')
+  if (contentRoot === 'archive-root' && contentCandidates.some((candidate) => candidate.prefix.length > 0)) {
+    throw new AppError('INVALID_CONTENT', 'This archive has a wrapper directory. It needs a provider or auto content-root rule before it can be installed.')
   }
-  const normalized = meaningful.map((entry) => ({ ...entry, path: strip && entry.path.startsWith(`${strip}/`) ? entry.path.slice(strip.length + 1) : entry.path }))
-  if (!normalized.some((entry) => CONTENT_ROOTS.has(entry.path.split('/')[0].toLowerCase()))) {
-    throw new AppError('INVALID_CONTENT', 'No recognized Counter-Strike: Source content folders were found.')
+  const prefix = contentCandidates[0].prefix
+  if (!contentCandidates.every((candidate) => candidate.prefix.join('/') === prefix.join('/'))) {
+    throw new AppError('INVALID_CONTENT', 'This archive contains multiple possible Source content roots. Review the mod instructions and import a single game-content folder.')
   }
+  const normalized = contentCandidates.map(({ entry }) => ({ ...entry, path: entry.path.split('/').slice(prefix.length).join('/') }))
   const seen = new Set<string>()
   for (const entry of normalized) {
     const key = entry.path.toLowerCase()
@@ -113,29 +197,39 @@ function normalizeEntries(entries: SafeEntry[], contentRoot: CatalogEntry['conte
 }
 
 export async function importArchive(archivePath: string, options: ImportOptions): Promise<InstalledMod> {
+  throwIfAborted(options.signal)
   const archiveStat = await stat(archivePath).catch(() => undefined)
   if (!archiveStat?.isFile()) throw new AppError('NOT_FOUND', 'The selected archive could not be read.')
   if (archiveStat.size > MAX_ARCHIVE_BYTES) throw new AppError('INVALID_ARCHIVE', 'The archive exceeds the 2 GiB safety limit.')
   if (options.expectedSize !== undefined && archiveStat.size !== options.expectedSize) throw new AppError('CHECKSUM_MISMATCH', 'Downloaded archive size does not match the catalog.')
   if (options.expectedSha256) {
     const hash = createHash('sha256')
-    for await (const chunk of createReadStream(archivePath)) hash.update(chunk)
+    for await (const chunk of createReadStream(archivePath)) {
+      throwIfAborted(options.signal)
+      hash.update(chunk)
+    }
     if (hash.digest('hex') !== options.expectedSha256) throw new AppError('CHECKSUM_MISMATCH', 'Downloaded archive checksum does not match the catalog.')
   }
-  options.emit?.({ operationId: 'import', stage: 'validating', message: 'Validating archive' })
+  options.emit?.({ operationId: 'import', stage: 'validating', message: 'Scanning archive structure and safety checks.' })
   const entries = await readEntries(archivePath)
+  throwIfAborted(options.signal)
   if (entries.reduce((sum, entry) => sum + entry.size, 0) > MAX_ARCHIVE_BYTES) throw new AppError('INVALID_ARCHIVE', 'Archive contents exceed the 2 GiB safety limit.')
   const normalized = normalizeEntries(entries, options.contentRoot)
+  const instructionEntries = entries.filter((entry) => !entry.directory && instructionFile(entry.path)).slice(0, 3)
+  const instructionParts = await Promise.all(instructionEntries.map(async (entry) => {
+    const text = await readEntryText(archivePath, entry.source)
+    return text?.trim() ? `## ${entry.path}\n${text.trim()}` : undefined
+  }))
+  const totalBytes = normalized.reduce((sum, entry) => sum + entry.size, 0)
+  const installationNotes = instructionParts.filter((part): part is string => Boolean(part)).join('\n\n').slice(0, 96 * 1024) || undefined
+  options.emit?.({ operationId: 'import', stage: 'validating', message: `Archive is safe. Found ${normalized.length} content file${normalized.length === 1 ? '' : 's'}${installationNotes ? ' and install notes for review' : ''}.`, bytesDone: 0, bytesTotal: totalBytes })
   await mkdir(options.libraryRoot, { recursive: true })
   const staging = await mkdtemp(join(options.libraryRoot, '.staging-'))
   try {
-    for (const entry of normalized) {
-      const target = join(staging, entry.path)
-      await mkdir(dirname(target), { recursive: true })
-      const original = entries.find((candidate) => candidate.path === entry.source)
-      if (!original) throw new AppError('INVALID_ARCHIVE', 'Archive entry disappeared during validation.')
-      await extractEntry(archivePath, original.source, target)
-    }
+    options.emit?.({ operationId: 'import', stage: 'staging', message: `Unpacking ${normalized.length} content file${normalized.length === 1 ? '' : 's'} in one pass.`, bytesDone: 0, bytesTotal: totalBytes })
+    await extractEntries(archivePath, normalized, staging, options.signal, options.emit)
+    options.emit?.({ operationId: 'import', stage: 'staging', message: `Unpacked ${normalized.length} content file${normalized.length === 1 ? '' : 's'}.`, bytesDone: totalBytes, bytesTotal: totalBytes })
+    throwIfAborted(options.signal)
     const title = options.title ?? basename(archivePath, extname(archivePath))
     const modId = options.modId ?? safeId(title)
     const storageId = storageSegment(options.storageId ?? modId, 'Mod storage ID')
@@ -145,20 +239,43 @@ export async function importArchive(archivePath: string, options: ImportOptions)
     await rm(contentPath, { recursive: true, force: true })
     await mkdir(dirname(contentPath), { recursive: true })
     await cp(staging, contentPath, { recursive: true, force: false, errorOnExist: true })
-    return { id: modId, source: options.source, title, version, author: options.author, description: options.description, contentPath, storageId, provider: options.provider, remoteModId: options.remoteModId, remoteFileId: options.remoteFileId, archivePath: options.source === 'local-zip' || options.source === 'catalog' || options.source === 'provider' ? archivePath : undefined, archiveSha256: options.expectedSha256, installedAt: new Date().toISOString(), sourceUrl: options.sourceUrl }
+    return { id: modId, source: options.source, title, version, author: options.author, description: options.description, contentPath, storageId, provider: options.provider, remoteModId: options.remoteModId, remoteFileId: options.remoteFileId, archivePath: options.source === 'local-zip' || options.source === 'catalog' || options.source === 'provider' ? archivePath : undefined, archiveSha256: options.expectedSha256, installedAt: new Date().toISOString(), sourceUrl: options.sourceUrl, installationNotes }
   } finally { await rm(staging, { recursive: true, force: true }) }
 }
 
 export async function importFolder(folderPath: string, options: Omit<ImportOptions, 'source'>): Promise<InstalledMod> {
+  throwIfAborted(options.signal)
   const folderStat = await stat(folderPath).catch(() => undefined)
   if (!folderStat?.isDirectory()) throw new AppError('NOT_FOUND', 'The selected mod folder could not be read.')
   const entries = await readdir(folderPath, { withFileTypes: true })
   const roots = entries.filter((entry) => entry.isDirectory() && CONTENT_ROOTS.has(entry.name.toLowerCase()))
   if (roots.length === 0) throw new AppError('INVALID_CONTENT', 'The selected folder has no recognized Source content roots.')
+  const noteEntry = entries.find((entry) => entry.isFile() && instructionFile(entry.name))
+  const installationNotes = noteEntry ? (await readFile(join(folderPath, noteEntry.name), 'utf8').catch(() => '')).slice(0, 96 * 1024).trim() || undefined : undefined
+  options.emit?.({ operationId: 'import', stage: 'validating', message: `Folder is safe. Found ${roots.length} recognized content root${roots.length === 1 ? '' : 's'}${installationNotes ? ' and install notes for review' : ''}.`, bytesDone: 0, bytesTotal: 1 })
   const title = options.title ?? basename(folderPath)
   const contentPath = join(options.libraryRoot, 'mods', safeId(title), options.version ?? 'local', 'content')
-  await rm(contentPath, { recursive: true, force: true })
+  const temporaryPath = `${contentPath}.importing-${Date.now()}`
+  const backupPath = `${contentPath}.backup-${Date.now()}`
+  await rm(temporaryPath, { recursive: true, force: true })
+  await rm(backupPath, { recursive: true, force: true })
   await mkdir(dirname(contentPath), { recursive: true })
-  await cp(folderPath, contentPath, { recursive: true, force: false, errorOnExist: true })
-  return { id: safeId(title), source: 'local-folder', title, version: options.version ?? 'local', contentPath, installedAt: new Date().toISOString() }
+  try {
+    throwIfAborted(options.signal)
+    options.emit?.({ operationId: 'import', stage: 'staging', message: 'Copying extracted content into managed storage.', bytesDone: 0, bytesTotal: 1 })
+    await cp(folderPath, temporaryPath, { recursive: true, force: false, errorOnExist: true })
+    throwIfAborted(options.signal)
+    const previousExists = await stat(contentPath).then(() => true, () => false)
+    if (previousExists) await rename(contentPath, backupPath)
+    await rename(temporaryPath, contentPath)
+    await rm(backupPath, { recursive: true, force: true })
+    options.emit?.({ operationId: 'import', stage: 'staging', message: 'Managed content is ready.', bytesDone: 1, bytesTotal: 1 })
+  } catch (error) {
+    await rm(temporaryPath, { recursive: true, force: true })
+    const currentExists = await stat(contentPath).then(() => true, () => false)
+    const backupExists = await stat(backupPath).then(() => true, () => false)
+    if (!currentExists && backupExists) await rename(backupPath, contentPath)
+    throw error
+  }
+  return { id: safeId(title), source: 'local-folder', title, version: options.version ?? 'local', contentPath, installedAt: new Date().toISOString(), installationNotes }
 }

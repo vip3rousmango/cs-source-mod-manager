@@ -53,7 +53,7 @@ export class DeploymentService {
     return { profileId, fileCount, conflicts, missingModIds, disabledModIds }
   }
 
-  async deploy(state: AppState, profileId: string, confirmConflicts: boolean): Promise<{ state: AppState; manifest: DeploymentManifest }> {
+  async deploy(state: AppState, profileId: string, confirmConflicts: boolean, operationId = profileId): Promise<{ state: AppState; manifest: DeploymentManifest }> {
     const preview = await this.preview(state, profileId)
     if (preview.missingModIds.length) throw new AppError('PROFILE_INVALID', 'Profile references missing mods.', preview.missingModIds)
     if (preview.conflicts.length && !confirmConflicts) throw new AppError('CONFLICT_CONFIRMATION_REQUIRED', 'Review and confirm the file conflicts before deploying.', preview.conflicts)
@@ -90,7 +90,7 @@ export class DeploymentService {
         await cp(winner.absolutePath, destination)
         files.push({ relativePath: winner.relativePath, ownerModId: winner.modId, sha256: await sha256(destination) })
         copied += 1
-        this.emit({ operationId: profileId, stage: 'deploying', message: `Copied ${copied} files`, bytesDone: copied, bytesTotal: winners.size })
+        this.emit({ operationId, stage: 'deploying', message: `Copied ${copied} files`, bytesDone: copied, bytesTotal: winners.size })
       }
       if (await exists(replacementRoot)) {
         await mkdir(dirname(backupRoot), { recursive: true })

@@ -6,6 +6,7 @@
     "perPage": 20,
     "total": 1,
     "hasMore": false,
+    "categories": [{"value": "HUD", "count": 1}],
     "mods": [
       {
         "provider": "gamebanana",
@@ -60,6 +61,7 @@
     ]
   },
   "download": {
-    "error": "Deterministic provider download failure."
+    "error": "Deterministic provider download failure.",
+    "progressDelayMs": 400
   }
 }

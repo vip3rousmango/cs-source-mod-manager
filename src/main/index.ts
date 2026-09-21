@@ -25,13 +25,15 @@ let appContext: AppContext | undefined
 
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    minWidth: 900,
-    minHeight: 600,
+    width: 1440,
+    height: 900,
+    minWidth: 1080,
+    minHeight: 700,
     webPreferences: { preload: join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true, allowRunningInsecureContent: false }
   })
   mainWindow = window
+  window.on('enter-full-screen', () => window.webContents.send('fullscreen-changed', true))
+  window.on('leave-full-screen', () => window.webContents.send('fullscreen-changed', false))
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   window.webContents.on('will-attach-webview', (event) => { event.preventDefault() })
   const devServerUrl = getDevServerUrl()
