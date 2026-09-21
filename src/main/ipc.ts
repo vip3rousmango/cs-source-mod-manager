@@ -68,6 +68,7 @@ function throwIfCancelled(context: AppContext): void {
 }
 async function waitForSignal(ms: number, signal?: AbortSignal): Promise<void> {
   if (ms <= 0) return
+  if (signal?.aborted) throw new AppError('OPERATION_CANCELLED', 'Operation cancelled. No managed content was changed.')
   await new Promise<void>((resolve, reject) => {
     const cleanup = (): void => signal?.removeEventListener('abort', abort)
     const timer = setTimeout(() => { cleanup(); resolve() }, ms)

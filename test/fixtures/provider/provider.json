@@ -62,6 +62,6 @@
   },
   "download": {
     "error": "Deterministic provider download failure.",
-    "progressDelayMs": 1200
+    "progressDelayMs": 400
   }
 }
